@@ -17,7 +17,7 @@ export default function Bookmarks() {
     if (!posts || posts.length === 0) {
       (async () => {
         try {
-          const res = await axios.get('http://localhost:8000/api/v1/post/all', { withCredentials: true });
+          const res = await axios.get('https://vybe-ymdg.onrender.com/api/v1/post/all', { withCredentials: true });
           if (res.data?.success && Array.isArray(res.data.posts)) {
             dispatch(setPosts(res.data.posts));
           }

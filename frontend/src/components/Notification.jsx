@@ -7,9 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { Trash2 } from "lucide-react";
 
-const API_BASE =
-  (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.replace(/\/$/, "")) ||
-  "http://localhost:8000";
+const API_BASE ="https://vybe-ymdg.onrender.com";
 
 export default function Notification() {
   const { user } = useSelector((s) => s.auth);

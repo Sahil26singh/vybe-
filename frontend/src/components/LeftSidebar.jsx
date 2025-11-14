@@ -21,7 +21,7 @@ import { setPosts, setSelectedPost } from "@/redux/postSlice";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import logo from '../assets/logo.png';
 
-const API_BASE ="http://localhost:8000";
+const API_BASE ="https://vybe-ymdg.onrender.com";
 
 const LeftSidebar = () => {
   const navigate = useNavigate();

@@ -18,7 +18,7 @@ export default function Search() {
     const run = async () => {
       if (!debounced.trim()) { setResults([]); setSuggestions([]); return; }
       const res = await axios.get(
-        `http://localhost:8000/api/v1/user/search?query=${encodeURIComponent(debounced)}`,
+        `https://vybe-ymdg.onrender.com/api/v1/user/search?query=${encodeURIComponent(debounced)}`,
         { withCredentials: true }
       );
       setResults(res.data?.results || []);

@@ -42,7 +42,7 @@ const EditProfile = () => {
         }
         try {
             setLoading(true);
-            const res = await axios.post('http://localhost:8000/api/v1/user/edit/profile', formData,{
+            const res = await axios.post('https://vybe-ymdg.onrender.com/api/v1/user/edit/profile', formData,{
                 headers:{
                     'Content-Type':'multipart/form-data'
                 },

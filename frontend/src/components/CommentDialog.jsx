@@ -10,7 +10,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import { setPosts } from '@/redux/postSlice';
 
-const API_BASE ='http://localhost:8000';
+const API_BASE ='https://vybe-ymdg.onrender.com';
 const POST_API = `${API_BASE}/api/v1/post`;
 
 const CommentDialog = ({ open, setOpen }) => {

@@ -65,7 +65,7 @@ const Post = ({ post }) => {
       dispatch(setPosts(updatedPosts));
       toast.success(liked ? "Post disliked" : "Post liked");
 
-      await axios.get(`http://localhost:8000/api/v1/post/${post._id}/${action}`, { withCredentials: true });
+      await axios.get(`https://vybe-ymdg.onrender.com/api/v1/post/${post._id}/${action}`, { withCredentials: true });
     } catch (error) {
       const reverted = posts.map((p) =>
         idStr(p._id) === idStr(post._id)
@@ -87,7 +87,7 @@ const Post = ({ post }) => {
   const commentHandler = async () => {
     try {
       const res = await axios.post(
-        `http://localhost:8000/api/v1/post/${post._id}/comment`,
+        `https://vybe-ymdg.onrender.com/api/v1/post/${post._id}/comment`,
         { text },
         { headers: { "Content-Type": "application/json" }, withCredentials: true }
       );
@@ -111,7 +111,7 @@ const Post = ({ post }) => {
   /* ---------------------------- DELETE POST ---------------------------- */
   const deletePostHandler = async () => {
     try {
-      const res = await axios.delete(`http://localhost:8000/api/v1/post/delete/${post?._id}`, {
+      const res = await axios.delete(`https://vybe-ymdg.onrender.com/api/v1/post/delete/${post?._id}`, {
         withCredentials: true,
       });
       if (res.data.success) {
@@ -149,7 +149,7 @@ const Post = ({ post }) => {
     dispatch(setPosts(nextPosts));
 
     try {
-      const res = await axios.get(`http://localhost:8000/api/v1/post/${post?._id}/bookmark`, { withCredentials: true });
+      const res = await axios.get(`https://vybe-ymdg.onrender.com/api/v1/post/${post?._id}/bookmark`, { withCredentials: true });
 
       if (res?.data?.success) {
         if (res.data.user) {
@@ -218,7 +218,7 @@ const Post = ({ post }) => {
       };
 
       const res = await axios.post(
-        `http://localhost:8000/api/v1/message/send/${receiver._id}`,
+        `https://vybe-ymdg.onrender.com/api/v1/message/send/${receiver._id}`,
         { textMessage: JSON.stringify(payload) },
         { headers: { "Content-Type": "application/json" }, withCredentials: true }
       );

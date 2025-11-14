@@ -5,7 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-const API_BASE ="http://localhost:8000";
+const API_BASE ="https://vybe-ymdg.onrender.com";
 
 export default function FollowersPage() {
     const navigate = useNavigate();

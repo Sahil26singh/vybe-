@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Button } from "./ui/button";
 import { useNavigate } from "react-router-dom";
 
-const API_BASE ="http://localhost:8000";
+const API_BASE ="https://vybe-ymdg.onrender.com";
 const MESSAGE_API = `${API_BASE}/api/v1/message`;
 
 const idStr = (v) => (v == null ? "" : String(v));
