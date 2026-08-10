@@ -213,7 +213,13 @@ export const login = async (req, res) => {
             ),
             posts: populatedPosts
         };
-        return res.cookie('token', token, { httpOnly: true, sameSite: 'strict', maxAge: 1 * 24 * 60 * 60 * 1000 }).json({
+        const isProd = process.env.NODE_ENV === "production";
+        return res.cookie('token', token, {
+            httpOnly: true,
+            sameSite: isProd ? 'none' : 'lax',
+            secure: isProd,
+            maxAge: 1 * 24 * 60 * 60 * 1000
+        }).json({
             message: `Welcome back ${user.username}`,
             success: true,
             user
@@ -227,7 +233,13 @@ export const login = async (req, res) => {
 
 export const logout = async (_, res) => {
     try {
-        return res.cookie("token", "", { maxAge: 0 }).json({
+        const isProd = process.env.NODE_ENV === "production";
+        return res.cookie("token", "", {
+            httpOnly: true,
+            sameSite: isProd ? 'none' : 'lax',
+            secure: isProd,
+            maxAge: 0
+        }).json({
             message: 'Logged out successfully.',
             success: true
         });

@@ -1,7 +1,10 @@
 import axios from "axios";
 
 // Single source of truth for the backend URL.
-export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+// In production, fallback to window.location.origin so requests hit the live server instead of localhost.
+export const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.MODE === "production" ? window.location.origin : "http://localhost:8000");
 
 const api = axios.create({
   baseURL: API_URL,
