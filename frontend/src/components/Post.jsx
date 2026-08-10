@@ -303,8 +303,13 @@ const Post = ({ post }) => {
         </Dialog>
       </div>
 
-      {/* Post Image */}
-      <img className="rounded-sm my-2 w-full aspect-square object-cover" src={post.image} alt={post.altText || "post_img"} />
+      {/* Post Image — click to open full post detail */}
+      <img
+        className="rounded-sm my-2 w-full aspect-square object-cover cursor-pointer hover:opacity-95 transition-opacity"
+        src={post.image}
+        alt={post.altText || "post_img"}
+        onClick={() => navigate(`/post/${post._id}`)}
+      />
 
       {/* Action Icons */}
       <div className="flex items-center justify-between my-2">
