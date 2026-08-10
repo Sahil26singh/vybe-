@@ -118,15 +118,27 @@ export const AppProvider = ({ children }) => {
         query: {
           userId: String(user._id),
         },
-        // Use polling first, then upgrade to websocket (required for Render's proxy)
+        // polling first for Render proxy compatibility, then upgrade to websocket
         transports: ["polling", "websocket"],
         withCredentials: true,
         reconnection: true,
-        reconnectionAttempts: 5,
+        reconnectionAttempts: 10,
         reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        timeout: 20000,
       });
 
       setSocket(socketio);
+
+      socketio.on("connect", () => {
+        console.log("Socket connected:", socketio.id);
+      });
+
+      // Re-register userId with server after every reconnection (e.g. page refresh)
+      socketio.on("reconnect", () => {
+        console.log("Socket reconnected, re-registering userId");
+        socketio.emit("registerUser", String(user._id));
+      });
 
       socketio.on("getOnlineUsers", (users) => {
         setOnlineUsers(users);
@@ -138,6 +150,8 @@ export const AppProvider = ({ children }) => {
       });
 
       return () => {
+        socketio.off("connect");
+        socketio.off("reconnect");
         socketio.off("getOnlineUsers");
         socketio.off("newNotification");
         if (socketio.connected) {

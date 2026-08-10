@@ -28,19 +28,28 @@ const userSocketMap = {} ; // this map stores socket id corresponding the user i
 
 export const getReceiverSocketId = (receiverId) => userSocketMap[receiverId];
 
-io.on('connection', async (socket)=>{
+io.on('connection', async (socket) => {
     const userId = socket.handshake.query.userId;
-    console.log(userId);
-    if(userId){
+    if (userId) {
         userSocketMap[userId] = socket.id;
-
+        console.log(`User connected: ${userId} -> ${socket.id}`);
     }
 
     io.emit('getOnlineUsers', Object.keys(userSocketMap));
 
-    socket.on('disconnect',()=>{
-        if(userId){
+    // Allow client to re-register userId after a reconnect
+    socket.on('registerUser', (uid) => {
+        if (uid) {
+            userSocketMap[uid] = socket.id;
+            console.log(`User re-registered: ${uid} -> ${socket.id}`);
+            io.emit('getOnlineUsers', Object.keys(userSocketMap));
+        }
+    });
+
+    socket.on('disconnect', () => {
+        if (userId) {
             delete userSocketMap[userId];
+            console.log(`User disconnected: ${userId}`);
         }
         io.emit('getOnlineUsers', Object.keys(userSocketMap));
     });
