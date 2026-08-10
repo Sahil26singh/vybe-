@@ -1,10 +1,22 @@
 import axios from "axios";
 
-// Single source of truth for the backend URL.
-// In production, fallback to window.location.origin so requests hit the live server instead of localhost.
-export const API_URL =
-  import.meta.env.VITE_API_URL ||
-  (import.meta.env.MODE === "production" ? window.location.origin : "http://localhost:8000");
+// Bulletproof backend URL resolver.
+// If browsing on any deployed domain (not localhost/127.0.0.1), always use window.location.origin.
+const getApiUrl = () => {
+  const envUrl = (import.meta.env.VITE_API_URL || "").trim();
+  if (envUrl && envUrl.length > 5) return envUrl;
+
+  if (typeof window !== "undefined" && window.location && window.location.origin) {
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    if (!isLocal) {
+      return window.location.origin;
+    }
+  }
+
+  return "http://localhost:8000";
+};
+
+export const API_URL = getApiUrl();
 
 const api = axios.create({
   baseURL: API_URL,
