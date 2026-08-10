@@ -13,10 +13,15 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS)
     .map(o => o.trim());
 
 const io = new Server(server, {
-    cors:{
-  origin: allowedOrigins,
-  methods: ['GET', 'POST']
-}
+    cors: {
+        origin: allowedOrigins,
+        methods: ['GET', 'POST'],
+        credentials: true,
+    },
+    transports: ['websocket', 'polling'],
+    allowEIO3: true,
+    pingTimeout: 60000,
+    pingInterval: 25000,
 })
 
 const userSocketMap = {} ; // this map stores socket id corresponding the user id; userId -> socketId

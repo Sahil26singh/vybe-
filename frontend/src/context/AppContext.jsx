@@ -118,8 +118,12 @@ export const AppProvider = ({ children }) => {
         query: {
           userId: String(user._id),
         },
-        transports: ["websocket", "polling"],
+        // Use polling first, then upgrade to websocket (required for Render's proxy)
+        transports: ["polling", "websocket"],
         withCredentials: true,
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
       });
 
       setSocket(socketio);
