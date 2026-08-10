@@ -8,8 +8,15 @@ import { MessageCircle, Send, Bookmark, BookmarkCheck, ArrowLeft } from "lucide-
 import { Button } from "./ui/button";
 import { toast } from "sonner";
 
-const idStr = (x) => (typeof x === "string" ? x : String(x?.toString?.() ?? x));
-const hasId = (list, id) => Array.isArray(list) && list.map(idStr).includes(idStr(id));
+// Handle both plain ID strings and populated user objects { _id, username, ... }
+const idStr = (x) => {
+  if (!x) return "";
+  if (typeof x === "string") return x;
+  if (typeof x === "object" && x._id) return String(x._id);
+  return String(x?.toString?.() ?? x);
+};
+const hasId = (list, id) =>
+  Array.isArray(list) && list.map(idStr).includes(idStr(id));
 
 export default function PostDetail() {
   const { id } = useParams();
