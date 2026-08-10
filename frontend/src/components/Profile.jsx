@@ -178,7 +178,11 @@ const Profile = () => {
 
           <div className="grid grid-cols-3 gap-4 my-5">
             {displayedPost?.map((post) => (
-              <div key={post?._id} className="relative group cursor-pointer">
+              <div
+                key={post?._id}
+                className="relative group cursor-pointer"
+                onClick={() => navigate(`/post/${post?._id}`)}
+              >
                 <img
                   src={post?.image}
                   alt="postimage"
