@@ -128,7 +128,9 @@ export default function PostDetail() {
             <Link to={`/profile/${post.author?._id}`} className="font-semibold text-sm hover:underline">
               {post.author?.username}
             </Link>
-            <p className="text-xs text-gray-400">{new Date(post.createdAt).toLocaleDateString()}</p>
+            {post.createdAt && !isNaN(new Date(post.createdAt)) && (
+              <p className="text-xs text-gray-400">{new Date(post.createdAt).toLocaleDateString()}</p>
+            )}
           </div>
         </div>
 
