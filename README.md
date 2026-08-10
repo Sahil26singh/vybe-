@@ -2,13 +2,6 @@
 
 Vybe is a modern, real-time social networking web application built on the MERN stack with integrated **Gemini AI Vector Search**, **AI Vision Caption Generation**, and **Socket.IO Real-Time Messaging**.
 
-![Vybe Platform](https://img.shields.io/badge/MERN-Stack-blue?style=for-the-badge)
-![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react)
-![Express](https://img.shields.io/badge/Express-5.1-000000?style=for-the-badge&logo=express)
-![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb)
-![Socket.IO](https://img.shields.io/badge/Socket.io-4.8-010101?style=for-the-badge&logo=socketdotio)
-![Google Gemini](https://img.shields.io/badge/Google_Gemini-AI_Vector_Search-8E75B2?style=for-the-badge&logo=googlegemini)
-
 ---
 
 ## ✨ Key Features
@@ -128,9 +121,3 @@ Vybe is a modern, real-time social networking web application built on the MERN 
 | **Posts** | `GET` | `/api/v1/post/all` | Fetch feed posts |
 | **Messages** | `POST` | `/api/v1/message/send/:id` | Send a direct message |
 | **Notifications**| `GET` | `/api/v1/notification` | Fetch user notifications & unread counts |
-
----
-
-## 📝 License
-
-Distributed under the ISC License. See `LICENSE` for more information.
