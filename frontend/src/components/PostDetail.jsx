@@ -20,10 +20,8 @@ export default function PostDetail() {
   const [loading, setLoading] = useState(true);
   const [commentText, setCommentText] = useState("");
   const [comments, setComments] = useState([]);
-
-  // Derived states
-  const liked = post ? hasId(post.likes, user?._id) : false;
-  const likeCount = post?.likes?.length ?? 0;
+  const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
 
   const isBookmarked = user?.bookmarks
     ? user.bookmarks.map(idStr).includes(idStr(post?._id))
@@ -35,9 +33,10 @@ export default function PostDetail() {
     if (cached) {
       setPost(cached);
       setComments(cached.comments || []);
+      setLiked(hasId(cached.likes, user?._id));
+      setLikeCount(Array.isArray(cached.likes) ? cached.likes.length : 0);
       setLoading(false);
     } else {
-      // Fetch from backend
       api.get(`${API_URL}/api/v1/post/all`, { withCredentials: true })
         .then((res) => {
           const all = Array.isArray(res.data?.posts) ? res.data.posts : [];
@@ -45,6 +44,8 @@ export default function PostDetail() {
           if (found) {
             setPost(found);
             setComments(found.comments || []);
+            setLiked(hasId(found.likes, user?._id));
+            setLikeCount(Array.isArray(found.likes) ? found.likes.length : 0);
           }
         })
         .catch(console.error)
@@ -55,14 +56,33 @@ export default function PostDetail() {
   const likeHandler = async () => {
     if (!post) return;
     const action = liked ? "dislike" : "like";
-    const updatedLikes = liked
-      ? post.likes.filter((l) => idStr(l) !== idStr(user._id))
-      : [...(post.likes || []), user._id];
-    setPost((p) => ({ ...p, likes: updatedLikes }));
+    const newLiked = !liked;
+    const newCount = newLiked ? likeCount + 1 : Math.max(0, likeCount - 1);
+
+    // Optimistic UI update
+    setLiked(newLiked);
+    setLikeCount(newCount);
+
+    // Also sync global posts feed state
+    setPosts((prev) =>
+      prev.map((p) =>
+        idStr(p._id) === idStr(post._id)
+          ? {
+              ...p,
+              likes: newLiked
+                ? [...(p.likes || []), user._id]
+                : (p.likes || []).filter((l) => idStr(l) !== idStr(user._id)),
+            }
+          : p
+      )
+    );
+
     try {
       await api.get(`${API_URL}/api/v1/post/${post._id}/${action}`, { withCredentials: true });
     } catch {
-      setPost((p) => ({ ...p, likes: post.likes }));
+      // Revert on error
+      setLiked(liked);
+      setLikeCount(likeCount);
       toast.error("Failed to update like");
     }
   };
