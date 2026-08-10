@@ -85,6 +85,7 @@ export default function PostDetail() {
     );
 
     try {
+      toast.success(newLiked ? "Post liked" : "Post disliked");
       await api.get(`${API_URL}/api/v1/post/${post._id}/${action}`, { withCredentials: true });
     } catch {
       // Revert on error

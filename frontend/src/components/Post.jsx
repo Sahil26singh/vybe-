@@ -58,6 +58,7 @@ const Post = ({ post }) => {
           : p
       );
       setPosts(updatedPosts);
+      toast.success(liked ? "Post disliked" : "Post liked");
 
       await api.get(`${API_URL}/api/v1/post/${post._id}/${action}`, { withCredentials: true });
     } catch (error) {
