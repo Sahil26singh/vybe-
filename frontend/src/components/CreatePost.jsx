@@ -113,7 +113,7 @@ const CreatePost = ({ open, setOpen }) => {
               ) : (
                 <>
                   <Sparkles className="h-3 w-3 text-blue-600" />
-                  AI Caption
+                  ✨ AI Caption
                 </>
               )}
             </Button>

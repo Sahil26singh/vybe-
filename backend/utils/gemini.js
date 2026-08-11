@@ -5,8 +5,28 @@ const isValidKey = apiKey && !apiKey.toLowerCase().includes("your_") && apiKey.l
 
 const genAI = isValidKey ? new GoogleGenerativeAI(apiKey) : null;
 
-// Uses a fast/cheap Gemini model — plenty for short alt-text + moderation checks.
-const MODEL_NAME = "gemini-2.0-flash";
+// Candidate generation models to auto-try in order of preference
+const CANDIDATE_MODELS = [
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-pro-latest",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash-exp",
+    "gemini-1.5-flash-001",
+    "gemini-1.5-flash-002",
+    "gemini-1.5-pro",
+    "gemini-pro-vision",
+    "gemini-3.5-flash-lite"
+];
+
+// Candidate embedding models
+const CANDIDATE_EMBEDDING_MODELS = [
+    "text-embedding-004",
+    "embedding-001",
+    "text-embedding-001"
+];
+
+let workingModelName = null;
+let workingEmbeddingModelName = null;
 
 const bufferToInlinePart = (imageBuffer) => ({
     inlineData: {
@@ -16,13 +36,42 @@ const bufferToInlinePart = (imageBuffer) => ({
 });
 
 /**
+ * Executes a Gemini prompt with automatic model fallback if a model is 404/deprecated.
+ */
+const generateContentWithFallback = async (contents, options = {}) => {
+    if (!genAI) throw new Error("Google AI API Key not configured");
+
+    const modelsToTry = workingModelName
+        ? [workingModelName, ...CANDIDATE_MODELS.filter((m) => m !== workingModelName)]
+        : CANDIDATE_MODELS;
+
+    let lastError = null;
+    for (const modelName of modelsToTry) {
+        try {
+            const model = genAI.getGenerativeModel({ model: modelName, ...options });
+            const result = await model.generateContent(contents);
+            if (result && result.response) {
+                workingModelName = modelName; // Cache working model for subsequent calls
+                return result;
+            }
+        } catch (err) {
+            lastError = err;
+            if (err.message?.includes("404") || err.message?.includes("not found")) {
+                continue;
+            }
+            throw err;
+        }
+    }
+    throw lastError || new Error("No available Gemini model succeeded");
+};
+
+/**
  * Generates a short, descriptive alt-text string for an image.
  */
 export const generateAltText = async (imageBuffer) => {
     if (!genAI) return "";
     try {
-        const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-        const result = await model.generateContent([
+        const result = await generateContentWithFallback([
             "Write a concise, factual alt-text description of this image for accessibility (screen readers). One sentence, no more than 20 words. Do not start with 'Image of' or 'Photo of'.",
             bufferToInlinePart(imageBuffer),
         ]);
@@ -41,8 +90,7 @@ export const generateAICaption = async (imageBuffer) => {
         return "Peaceful moments and good vibes ✨🌅 #sunset #peace #vibes";
     }
     try {
-        const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-        const result = await model.generateContent([
+        const result = await generateContentWithFallback([
             "Write an engaging, aesthetic social media caption for this image. Include 2-3 emojis and 2-3 relevant trending hashtags. Keep it under 2 sentences.",
             bufferToInlinePart(imageBuffer),
         ]);
@@ -59,10 +107,6 @@ export const generateAICaption = async (imageBuffer) => {
 export const moderateContent = async (imageBuffer, caption = "") => {
     if (!genAI) return { safe: true, reason: "" };
     try {
-        const model = genAI.getGenerativeModel({
-            model: MODEL_NAME,
-            generationConfig: { responseMimeType: "application/json" },
-        });
         const prompt = `You are a content moderation classifier for a social media app.
 Look at this image and caption, and decide if it violates policy.
 Flag as unsafe: graphic violence/gore, sexual/nude content, hate symbols, or content promoting self-harm.
@@ -71,10 +115,10 @@ Caption: ${JSON.stringify(caption || "")}
 
 Respond ONLY with JSON: {"safe": boolean, "reason": string}. "reason" should be empty if safe.`;
 
-        const result = await model.generateContent([
-            prompt,
-            bufferToInlinePart(imageBuffer),
-        ]);
+        const result = await generateContentWithFallback(
+            [prompt, bufferToInlinePart(imageBuffer)],
+            { generationConfig: { responseMimeType: "application/json" } }
+        );
         const parsed = JSON.parse(result.response.text());
         return {
             safe: parsed.safe !== false,
@@ -88,22 +132,32 @@ Respond ONLY with JSON: {"safe": boolean, "reason": string}. "reason" should be 
 
 /**
  * Generates a 768-dimensional vector embedding for user text.
- * Uses Gemini text-embedding-004 model if GEMINI_API_KEY is present,
- * or a deterministic feature vector fallback if key is absent.
+ * Uses Gemini embedding model if API key is present with fallback vector.
  */
 export const generateUserEmbedding = async (text) => {
     if (!text || !text.trim()) return [];
 
     // 1. Try Gemini AI if valid API key exists
     if (genAI) {
-        try {
-            const model = genAI.getGenerativeModel({ model: "text-embedding-004" });
-            const result = await model.embedContent(text.trim());
-            if (result?.embedding?.values?.length) {
-                return result.embedding.values;
+        const modelsToTry = workingEmbeddingModelName
+            ? [workingEmbeddingModelName, ...CANDIDATE_EMBEDDING_MODELS.filter((m) => m !== workingEmbeddingModelName)]
+            : CANDIDATE_EMBEDDING_MODELS;
+
+        for (const modelName of modelsToTry) {
+            try {
+                const model = genAI.getGenerativeModel({ model: modelName });
+                const result = await model.embedContent(text.trim());
+                if (result?.embedding?.values?.length) {
+                    workingEmbeddingModelName = modelName; // Cache working embedding model
+                    return result.embedding.values;
+                }
+            } catch (error) {
+                if (error.message?.includes("404") || error.message?.includes("not found")) {
+                    continue; // Try next embedding model candidate
+                }
+                console.log(`Gemini embedding model [${modelName}] error:`, error.message);
+                break;
             }
-        } catch (error) {
-            console.log("Gemini API embedding error (using fallback vector):", error.message);
         }
     }
 
