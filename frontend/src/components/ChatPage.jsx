@@ -16,6 +16,7 @@ const ChatPage = () => {
 
   const [connectedUsers, setConnectedUsers] = useState([]);
   const [loadingConnections, setLoadingConnections] = useState(false);
+  const [sending, setSending] = useState(false);
 
   // Fetch all connected users (followers + following)
   useEffect(() => {
@@ -51,7 +52,8 @@ const ChatPage = () => {
 
   // Send message
   const sendMessageHandler = async (receiverId) => {
-    if (!textMessage.trim()) return;
+    if (!textMessage.trim() || sending) return;  // guard: no double-send
+    setSending(true);
     try {
       const res = await api.post(
         `${API_URL}/api/v1/message/send/${receiverId}`,
@@ -62,11 +64,17 @@ const ChatPage = () => {
         }
       );
       if (res.data.success) {
-        setMessages([...(messages || []), res.data.newMessage]);
+        setMessages((prev) => {
+          // Deduplicate on sender side too
+          if ((prev || []).some((m) => m._id === res.data.newMessage._id)) return prev;
+          return [...(prev || []), res.data.newMessage];
+        });
         setTextMessage("");
       }
     } catch (error) {
       console.log(error);
+    } finally {
+      setSending(false);
     }
   };
 
@@ -219,8 +227,9 @@ const ChatPage = () => {
               onClick={() =>
                 selectedUser?._id && sendMessageHandler(selectedUser._id)
               }
+              disabled={sending || !textMessage.trim()}
             >
-              Send
+              {sending ? "Sending..." : "Send"}
             </Button>
           </div>
         </section>

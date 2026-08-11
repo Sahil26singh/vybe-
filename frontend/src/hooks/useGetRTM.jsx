@@ -8,7 +8,12 @@ const useGetRTM = () => {
     if (!socket) return;
 
     const handleNewMessage = (newMessage) => {
-      setMessages((prev) => [...(prev || []), newMessage]);
+      if (!newMessage?._id) return;
+      setMessages((prev) => {
+        // Deduplicate: skip if a message with this _id already exists
+        if ((prev || []).some((m) => m._id === newMessage._id)) return prev;
+        return [...(prev || []), newMessage];
+      });
     };
 
     const handleMessageEdited = (editedMsg) => {
