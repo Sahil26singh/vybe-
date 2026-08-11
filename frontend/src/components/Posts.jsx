@@ -4,10 +4,13 @@ import { useApp } from '@/context/AppContext';
 
 const Posts = () => {
   const { posts } = useApp();
+  const sorted = [...posts].sort(
+    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+  );
   return (
     <div>
         {
-            posts.map((post) => <Post key={post._id} post={post}/>)
+            sorted.map((post) => <Post key={post._id} post={post}/>)
         }
     </div>
   );

@@ -102,6 +102,12 @@ const Messages = () => {
 
   const { messages, setMessages, user, suggestedUsers } = useApp();
   const containerRef = useRef(null);
+  const bottomRef = useRef(null);
+
+  // Auto-scroll to the bottom whenever messages change
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const [activeMsg, setActiveMsg] = useState(null);
 
@@ -302,7 +308,10 @@ const Messages = () => {
     <>
       <div className="overflow-y-auto flex-1 p-4" ref={containerRef}>
         <div className="flex justify-center">
-          <div className="max-w-2xl w-full">{messages.map((m) => renderBubble(m))}</div>
+          <div className="max-w-2xl w-full">
+            {messages.map((m) => renderBubble(m))}
+            <div ref={bottomRef} />
+          </div>
         </div>
       </div>
 
