@@ -112,71 +112,14 @@ export const AppProvider = ({ children }) => {
 
   // --- Socket State & Centralized Lifecycle ---
   const [socket, setSocket] = useState(null);
-  // Keep the live socket instance in a ref so React cleanup cycles don't destroy it
   const socketRef = useRef(null);
   const socketUserIdRef = useRef(null);
 
   useEffect(() => {
     const userId = user?._id ? String(user._id) : null;
 
-    if (userId) {
-      // If we already have a live socket for this exact user, just sync state and bail.
-      // This covers the case where React StrictMode or a re-render re-runs the effect
-      // but the user hasn't changed — we must NOT disconnect and reconnect.
-      if (socketRef.current && socketUserIdRef.current === userId) {
-        if (!socket) setSocket(socketRef.current);
-        return;
-      }
-
-      // Tear down any existing socket for a DIFFERENT user (e.g., user switched accounts)
-      if (socketRef.current) {
-        socketRef.current.off();
-        socketRef.current.disconnect();
-        socketRef.current = null;
-        socketUserIdRef.current = null;
-      }
-
-      const socketio = io(API_URL, {
-        query: { userId },
-        transports: ["polling", "websocket"],
-        withCredentials: true,
-        reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        timeout: 20000,
-      });
-
-      socketRef.current = socketio;
-      socketUserIdRef.current = userId;
-      setSocket(socketio);
-
-      socketio.on("connect", () => {
-        console.log("Socket connected:", socketio.id);
-      });
-
-      socketio.on("reconnect", () => {
-        console.log("Socket reconnected, re-registering userId");
-        socketio.emit("registerUser", userId);
-      });
-
-      socketio.on("getOnlineUsers", (users) => {
-        setOnlineUsers(users);
-      });
-
-      socketio.on("newNotification", (notification) => {
-        setLikeNotification(notification);
-        fetchUnreadNotifCount();
-      });
-
-      // Cleanup runs when userId changes or component unmounts.
-      // We do NOT disconnect here — the socket should stay alive across re-renders.
-      // We only disconnect when userId becomes null (logout) handled in the else branch below.
-      return () => {
-        // intentionally empty — socket lives in the ref
-      };
-    } else {
-      // User logged out — destroy the socket
+    if (!userId) {
+      // Logged out — tear down socket completely
       if (socketRef.current) {
         socketRef.current.off();
         socketRef.current.disconnect();
@@ -185,7 +128,70 @@ export const AppProvider = ({ children }) => {
       }
       setSocket(null);
       setOnlineUsers([]);
+      return;
     }
+
+    // Create a new socket only when needed (first time or different user)
+    if (!socketRef.current || socketUserIdRef.current !== userId) {
+      if (socketRef.current) {
+        socketRef.current.off();
+        socketRef.current.disconnect();
+      }
+
+      const socketio = io(API_URL, {
+        query: { userId },
+        transports: ["polling", "websocket"],
+        withCredentials: true,
+        reconnection: true,
+        reconnectionAttempts: Infinity,   // keep retrying forever
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        timeout: 20000,
+      });
+
+      socketRef.current = socketio;
+      socketUserIdRef.current = userId;
+      setSocket(socketio);
+    }
+
+    // Always (re-)attach handlers with named functions so cleanup can remove them precisely.
+    // In socket.io v4, the "connect" event fires on BOTH initial connection AND every
+    // successful reconnection — making it the correct place to re-register the userId.
+    const socketio = socketRef.current;
+
+    const onConnect = () => {
+      console.log("Socket connected:", socketio.id);
+      socketio.emit("registerUser", userId); // re-register on every connect/reconnect
+    };
+
+    const onGetOnlineUsers = (users) => setOnlineUsers(users);
+
+    const onNewNotification = (notification) => {
+      setLikeNotification(notification);
+      fetchUnreadNotifCount();
+    };
+
+    const onConnectError = (err) => {
+      console.warn("Socket connect error:", err.message);
+    };
+
+    socketio.on("connect", onConnect);
+    socketio.on("connect_error", onConnectError);
+    socketio.on("getOnlineUsers", onGetOnlineUsers);
+    socketio.on("newNotification", onNewNotification);
+
+    // If the socket is already connected (e.g. Strict Mode re-run), register immediately
+    if (socketio.connected) {
+      socketio.emit("registerUser", userId);
+    }
+
+    return () => {
+      // Remove only the handlers added in this effect run — never disconnect the socket
+      socketio.off("connect", onConnect);
+      socketio.off("connect_error", onConnectError);
+      socketio.off("getOnlineUsers", onGetOnlineUsers);
+      socketio.off("newNotification", onNewNotification);
+    };
   }, [user?._id]);
 
   const value = {
