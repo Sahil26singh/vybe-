@@ -6,7 +6,6 @@ import { Input } from "./ui/input";
 export default function Search() {
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
-  const [suggestions, setSuggestions] = useState([]);
   const [debounced, setDebounced] = useState(q);
 
   useEffect(() => {
@@ -16,13 +15,12 @@ export default function Search() {
 
   useEffect(() => {
     const run = async () => {
-      if (!debounced.trim()) { setResults([]); setSuggestions([]); return; }
+      if (!debounced.trim()) { setResults([]); return; }
       const res = await api.get(
         `${API_URL}/api/v1/user/search?query=${encodeURIComponent(debounced)}`,
         { withCredentials: true }
       );
       setResults(res.data?.results || []);
-      setSuggestions(res.data?.suggestions || []);
     };
     run();
   }, [debounced]);
@@ -38,19 +36,15 @@ export default function Search() {
   );
 
   return (
-    <div className="pl-[20%] pr-6 py-6 max-w-3xl">
+    <div className="px-4 sm:px-6 py-6 max-w-3xl">
       <h2 className="text-xl font-semibold mb-4">Search users</h2>
-      <Input placeholder="Search by username…" value={q} onChange={(e)=>setQ(e.target.value)} />
+      <Input placeholder="Search by username…" value={q} onChange={(e) => setQ(e.target.value)} />
 
       <div className="mt-6">
         <h3 className="font-medium mb-2">Top matches</h3>
         {results.length ? <div className="space-y-2">{results.map(Row)}</div> : <p className="text-sm text-gray-500">No matches</p>}
       </div>
 
-      <div className="mt-6">
-        <h3 className="font-medium mb-2">Suggestions</h3>
-        {suggestions.length ? <div className="space-y-2">{suggestions.map(Row)}</div> : <p className="text-sm text-gray-500">No suggestions</p>}
-      </div>
     </div>
   );
 }

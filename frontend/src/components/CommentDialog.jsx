@@ -106,7 +106,7 @@ const CommentDialog = ({ open, setOpen }) => {
           <div className="w-1/2 flex flex-col justify-between">
             <div className="flex items-center justify-between p-4">
               <div className="flex gap-3 items-center">
-                <Link>
+                <Link to={`/profile/${selectedPost?.author?._id}`}>
                   <Avatar>
                     <AvatarImage src={selectedPost?.author?.profilePicture} />
                     <AvatarFallback>
@@ -115,7 +115,7 @@ const CommentDialog = ({ open, setOpen }) => {
                   </Avatar>
                 </Link>
                 <div>
-                  <Link className="font-semibold text-xs">{selectedPost?.author?.username}</Link>
+                  <Link to={`/profile/${selectedPost?.author?._id}`} className="font-semibold text-xs">{selectedPost?.author?.username}</Link>
                 </div>
               </div>
 

@@ -37,7 +37,7 @@ export default function Likes() {
   }
 
   return (
-    <div className="flex-1 my-8 flex flex-col items-center pl-[20%]">
+    <div className="flex-1 my-8 flex flex-col items-center px-4">
       {likedPosts.length === 0 ? (
         <p className="text-md font-bold flex items-center justify-center h-154 text-gray-500">
           You haven’t liked any posts yet.

@@ -16,7 +16,7 @@ const useGetAllMessage = () => {
                 console.log(error);
             }
         };
-        fetchAllMessage();
-    }, [selectedUser]);
+    fetchAllMessage();
+    }, [selectedUser?._id]);
 };
 export default useGetAllMessage;

@@ -121,7 +121,7 @@ const ChatPage = () => {
   }, []);
 
   return (
-    <div className="flex ml-[10%] h-screen">
+    <div className="flex h-screen w-full">
       {/* LEFT: People list */}
       <section className="w-full md:w-2/6 my-8">
         <h1 className="font-semibold flex mb-4 px-3 text-xl">

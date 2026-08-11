@@ -92,9 +92,9 @@ const Profile = () => {
   }, [activeTab, userProfile?.posts, userProfile?.bookmarks, posts]);
 
   return (
-    <div className="flex max-w-5xl justify-center mx-auto pl-10">
-      <div className="flex flex-col gap-20 p-8 pt-15">
-        <div className="grid grid-cols-2">
+    <div className="flex max-w-5xl justify-center mx-auto px-4 sm:px-6 lg:px-10">
+      <div className="flex flex-col gap-10 sm:gap-20 p-4 sm:p-8 pt-8 sm:pt-15 w-full">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <section className="flex items-center justify-center">
             <Avatar className="h-32 w-32">
               <AvatarImage src={userProfile?.profilePicture} alt="profilephoto" />
@@ -176,7 +176,7 @@ const Profile = () => {
             </span>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 my-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 my-5">
             {displayedPost?.map((post) => (
               <div
                 key={post?._id}

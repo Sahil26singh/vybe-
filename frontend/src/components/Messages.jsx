@@ -186,10 +186,10 @@ const Messages = () => {
     }
 
     try {
-      const optimistic = messages.map((x) =>
-        x._id === m._id ? { ...x, message: nextTextRaw } : x
+      // Optimistic update using functional form to avoid stale closure
+      setMessages((prev) =>
+        prev.map((x) => (x._id === m._id ? { ...x, message: nextTextRaw } : x))
       );
-      setMessages(optimistic);
 
       const res = await api.put(
         `${MESSAGE_API}/${m._id}`,
@@ -198,8 +198,9 @@ const Messages = () => {
       );
 
       if (res.data?.success && res.data.message) {
-        const synced = messages.map((x) => (x._id === m._id ? res.data.message : x));
-        setMessages(synced);
+        setMessages((prev) =>
+          prev.map((x) => (x._id === m._id ? res.data.message : x))
+        );
       }
       closeAll();
     } catch (e) {

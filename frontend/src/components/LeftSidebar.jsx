@@ -174,11 +174,13 @@ const LeftSidebar = () => {
   };
 
   return (
-    <div className="fixed top-0 z-10 left-0 px-4 border-r border-gray-300 w-[16%] h-screen">
+    <>
+      {/* ─── Desktop / Tablet sidebar ───────────────────────────────── */}
+      <div className="fixed top-0 z-20 left-0 px-2 lg:px-4 border-r border-gray-300 w-[72px] lg:w-[16%] h-screen hidden md:flex flex-col">
       <div className="flex flex-col">
-        <div className="flex items-center justify-evenly my-7 pl-0">
+        <div className="flex items-center justify-center lg:justify-evenly my-7 pl-0">
           <img className="w-10 h-10" src={logo} alt="logo" />
-          <h1 className="font-bold text-xl -translate-x-8">Vybe</h1>
+          <h1 className="font-bold text-xl -translate-x-8 hidden lg:block">Vybe</h1>
         </div>
 
         <div>
@@ -204,7 +206,7 @@ const LeftSidebar = () => {
                       }}
                     >
                       {item.icon}
-                      <span>{item.text}</span>
+                      <span className="hidden lg:inline">{item.text}</span>
                     </div>
                   </PopoverTrigger>
 
@@ -254,7 +256,7 @@ const LeftSidebar = () => {
                 role="button"
               >
                 {item.icon}
-                <span>{item.text}</span>
+                <span className="hidden lg:inline">{item.text}</span>
 
                 {/* Notification badge */}
                 {isNotif && unreadNotifCount > 0 && (
@@ -267,6 +269,7 @@ const LeftSidebar = () => {
           })}
         </div>
       </div>
+      </div>
 
       <CreatePost
         open={open}
@@ -275,7 +278,42 @@ const LeftSidebar = () => {
           if (!v && manualActive === "Create") setManualActive(null);
         }}
       />
-    </div>
+
+      {/* ─── Mobile Bottom Nav (hidden on md+) ──────────────────────────── */}
+      <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-gray-200 flex md:hidden justify-around items-center h-16 px-2">
+        {[
+          { icon: <Home size={22} />, text: "Home" },
+          { icon: <Search size={22} />, text: "Search" },
+          { icon: <PlusSquare size={22} />, text: "Create" },
+          { icon: <Bell size={22} />, text: "Notifications" },
+          { icon: (
+            <Avatar className="w-7 h-7">
+              <AvatarImage src={user?.profilePicture} alt="@user" />
+              <AvatarFallback>{(user?.username || "X").slice(0, 2).toUpperCase()}</AvatarFallback>
+            </Avatar>
+          ), text: "Profile" },
+        ].map((item, i) => {
+          const active = isActive(item.text);
+          return (
+            <button
+              key={i}
+              onClick={() => sidebarHandler(item.text)}
+              className={`flex flex-col items-center justify-center gap-0.5 p-2 rounded-lg transition-colors relative ${
+                active ? "text-black" : "text-gray-500 hover:text-black"
+              }`}
+            >
+              {item.icon}
+              {item.text === "Notifications" && unreadNotifCount > 0 && (
+                <span className="absolute top-1 right-1 inline-flex items-center justify-center px-1 py-0.5 text-[9px] font-bold text-white bg-red-600 rounded-full">
+                  {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
+                </span>
+              )}
+              <span className="text-[10px] font-medium">{item.text}</span>
+            </button>
+          );
+        })}
+      </nav>
+    </>
   );
 };
 

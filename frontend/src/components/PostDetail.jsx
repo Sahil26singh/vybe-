@@ -65,6 +65,9 @@ export default function PostDetail() {
     const action = liked ? "dislike" : "like";
     const newLiked = !liked;
     const newCount = newLiked ? likeCount + 1 : Math.max(0, likeCount - 1);
+    // Capture pre-action values for error revert
+    const prevLiked = liked;
+    const prevCount = likeCount;
 
     // Optimistic UI update
     setLiked(newLiked);
@@ -88,9 +91,9 @@ export default function PostDetail() {
       toast.success(newLiked ? "Post liked" : "Post disliked");
       await api.get(`${API_URL}/api/v1/post/${post._id}/${action}`, { withCredentials: true });
     } catch {
-      // Revert on error
-      setLiked(liked);
-      setLikeCount(likeCount);
+      // Revert on error using captured pre-action values
+      setLiked(prevLiked);
+      setLikeCount(prevCount);
       toast.error("Failed to update like");
     }
   };

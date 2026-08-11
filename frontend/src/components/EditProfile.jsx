@@ -74,7 +74,7 @@ const EditProfile = () => {
     };
 
     return (
-        <div className='flex max-w-2xl mx-auto pl-10'>
+        <div className='flex max-w-2xl mx-auto px-4 sm:px-6 lg:pl-10'>
             <section className='flex flex-col gap-6 w-full my-8'>
                 <div className='flex items-center justify-between'>
                     <h1 className='font-bold text-xl'>Edit Profile</h1>

@@ -71,7 +71,7 @@ export default function Notification() {
   }, [user?._id]);
 
   return (
-    <div className="flex flex-col w-full h-full p-3 bg-white rounded shadow overflow-hidden">
+    <div className="flex flex-col w-full h-full p-3 sm:p-6 bg-white rounded shadow overflow-hidden">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-lg font-semibold">Notifications</h3>
         <div className="flex items-center gap-2">

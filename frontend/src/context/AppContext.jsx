@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef } from "react";
+
 import { io } from "socket.io-client";
 import api, { API_URL } from "@/lib/axios";
 
@@ -111,14 +112,32 @@ export const AppProvider = ({ children }) => {
 
   // --- Socket State & Centralized Lifecycle ---
   const [socket, setSocket] = useState(null);
+  // Keep the live socket instance in a ref so React cleanup cycles don't destroy it
+  const socketRef = useRef(null);
+  const socketUserIdRef = useRef(null);
 
   useEffect(() => {
-    if (user?._id) {
+    const userId = user?._id ? String(user._id) : null;
+
+    if (userId) {
+      // If we already have a live socket for this exact user, just sync state and bail.
+      // This covers the case where React StrictMode or a re-render re-runs the effect
+      // but the user hasn't changed — we must NOT disconnect and reconnect.
+      if (socketRef.current && socketUserIdRef.current === userId) {
+        if (!socket) setSocket(socketRef.current);
+        return;
+      }
+
+      // Tear down any existing socket for a DIFFERENT user (e.g., user switched accounts)
+      if (socketRef.current) {
+        socketRef.current.off();
+        socketRef.current.disconnect();
+        socketRef.current = null;
+        socketUserIdRef.current = null;
+      }
+
       const socketio = io(API_URL, {
-        query: {
-          userId: String(user._id),
-        },
-        // polling first for Render proxy compatibility, then upgrade to websocket
+        query: { userId },
         transports: ["polling", "websocket"],
         withCredentials: true,
         reconnection: true,
@@ -128,16 +147,17 @@ export const AppProvider = ({ children }) => {
         timeout: 20000,
       });
 
+      socketRef.current = socketio;
+      socketUserIdRef.current = userId;
       setSocket(socketio);
 
       socketio.on("connect", () => {
         console.log("Socket connected:", socketio.id);
       });
 
-      // Re-register userId with server after every reconnection (e.g. page refresh)
       socketio.on("reconnect", () => {
         console.log("Socket reconnected, re-registering userId");
-        socketio.emit("registerUser", String(user._id));
+        socketio.emit("registerUser", userId);
       });
 
       socketio.on("getOnlineUsers", (users) => {
@@ -149,21 +169,21 @@ export const AppProvider = ({ children }) => {
         fetchUnreadNotifCount();
       });
 
+      // Cleanup runs when userId changes or component unmounts.
+      // We do NOT disconnect here — the socket should stay alive across re-renders.
+      // We only disconnect when userId becomes null (logout) handled in the else branch below.
       return () => {
-        socketio.off("connect");
-        socketio.off("reconnect");
-        socketio.off("getOnlineUsers");
-        socketio.off("newNotification");
-        if (socketio.connected) {
-          socketio.disconnect();
-        }
-        setSocket(null);
+        // intentionally empty — socket lives in the ref
       };
     } else {
-      setSocket((prevSocket) => {
-        if (prevSocket && prevSocket.connected) prevSocket.disconnect();
-        return null;
-      });
+      // User logged out — destroy the socket
+      if (socketRef.current) {
+        socketRef.current.off();
+        socketRef.current.disconnect();
+        socketRef.current = null;
+        socketUserIdRef.current = null;
+      }
+      setSocket(null);
       setOnlineUsers([]);
     }
   }, [user?._id]);

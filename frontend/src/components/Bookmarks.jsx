@@ -34,7 +34,7 @@ export default function Bookmarks() {
   }
 
   return (
-    <div className="flex-1 my-8 flex flex-col items-center pl-[20%]">
+    <div className="flex-1 my-8 flex flex-col items-center px-4">
       {bookmarkedPosts.length === 0 ? (
         <p className="text-md font-bold flex items-center justify-center h-154 text-gray-500">No bookmarked posts yet.</p>
       ) : (
