@@ -52,21 +52,3 @@ api.interceptors.response.use(
 );
 
 export default api;
-
-// ── Keep-alive ping ──────────────────────────────────────────────────────────
-// Render free tier sleeps the server after 15 minutes of inactivity, causing
-// a 30-60s cold start on the next request. Pinging every 14 minutes keeps it
-// awake. Only runs in production (skip on localhost dev).
-const isLocalDev =
-  typeof window !== "undefined" &&
-  (window.location.hostname === "localhost" ||
-    window.location.hostname === "127.0.0.1");
-
-if (!isLocalDev) {
-  const PING_INTERVAL_MS = 14 * 60 * 1000; // 14 minutes
-  setInterval(() => {
-    api.get("/api/v1/user/suggested", { withCredentials: true }).catch(() => {
-      // Silently ignore — this is just a heartbeat
-    });
-  }, PING_INTERVAL_MS);
-}
