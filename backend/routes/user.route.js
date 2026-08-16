@@ -4,7 +4,7 @@ import isAuthenticated from "../middlewares/isAuthenticated.js";
 import upload from "../middlewares/multer.js";
 
 const router = express.Router();
-// ...existing routes...
+
 router.route('/:id/followers').get(isAuthenticated, getFollowers);
 router.route('/:id/following').get(isAuthenticated, getFollowing);
 

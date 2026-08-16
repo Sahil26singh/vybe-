@@ -11,7 +11,6 @@ import { toast } from "sonner";
 import { Badge } from "./ui/badge";
 import { useNavigate } from "react-router-dom";
 
-/* ---------- helpers ---------- */
 const idStr = (x) => (typeof x === "string" ? x : String(x?.toString?.() ?? x));
 const hasId = (list, id) => Array.isArray(list) && list.map(idStr).includes(idStr(id));
 
@@ -42,7 +41,6 @@ const Post = ({ post }) => {
     setText(v.trim() ? v : "");
   };
 
-  /* ------------------------- LIKE (optimistic) ------------------------- */
   const likeOrDislikeHandler = async () => {
     try {
       const action = liked ? "dislike" : "like";
@@ -78,7 +76,6 @@ const Post = ({ post }) => {
     }
   };
 
-  /* ------------------------ COMMENT: add comment ------------------------ */
   const commentHandler = async () => {
     try {
       const res = await api.post(
@@ -103,7 +100,6 @@ const Post = ({ post }) => {
     }
   };
 
-  /* ---------------------------- DELETE POST ---------------------------- */
   const deletePostHandler = async () => {
     try {
       const res = await api.delete(`${API_URL}/api/v1/post/delete/${post?._id}`, {
@@ -120,7 +116,6 @@ const Post = ({ post }) => {
     }
   };
 
-  /* --------------------- BOOKMARK: persisted in auth.user --------------------- */
   const bookmarked = hasId(user?.bookmarks, post._id);
 
   const bookmarkHandler = async () => {
@@ -168,7 +163,6 @@ const Post = ({ post }) => {
     }
   };
 
-  /* ------------------- keep like UI in sync ------------------- */
   useEffect(() => {
     if (!post || !user) return;
     const currentPost = posts?.find((p) => idStr(p._id) === idStr(post._id)) || post;
@@ -177,7 +171,6 @@ const Post = ({ post }) => {
     setLiked(hasId(likesArr, user._id));
   }, [posts, post, user]);
 
-  /* ------------------- SHARE: send a post preview in chat ------------------- */
   const [connections, setConnections] = useState([]);
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import {Server} from "socket.io";
+import { Server } from "socket.io";
 import express from "express";
 import http from "http";
 
@@ -24,7 +24,7 @@ const io = new Server(server, {
     pingInterval: 25000,
 })
 
-const userSocketMap = {} ; // this map stores socket id corresponding the user id; userId -> socketId
+const userSocketMap = {}; //userId -> socketId
 
 export const getReceiverSocketId = (receiverId) => userSocketMap[receiverId];
 
@@ -55,4 +55,4 @@ io.on('connection', async (socket) => {
     });
 })
 
-export {app, server, io};
+export { app, server, io };

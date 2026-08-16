@@ -22,7 +22,7 @@ export const updateUserEmbedding = async (userId) => {
       user.embeddingUpdatedAt = new Date();
       user.markModified("embedding");
       await user.save();
-      console.log(`🧠 [Vector Embedding] Generated ${embedding.length}-dim vector for user @${user.username}`);
+      console.log(` [Vector Embedding] Generated ${embedding.length}-dim vector for user @${user.username}`);
     }
   } catch (err) {
     console.error("updateUserEmbedding error:", err.message);

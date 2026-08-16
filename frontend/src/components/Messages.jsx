@@ -192,7 +192,6 @@ const Messages = () => {
     }
 
     try {
-      // Optimistic update using functional form to avoid stale closure
       setMessages((prev) =>
         prev.map((x) => (x._id === m._id ? { ...x, message: nextTextRaw } : x))
       );
@@ -327,7 +326,7 @@ const Messages = () => {
                   setShowEdit(true);
                 }}
               >
-                ✏️ Edit{activeIsShared() ? " caption" : ""}
+                 Edit{activeIsShared() ? " caption" : ""}
               </button>
             )}
             <button
@@ -337,7 +336,7 @@ const Messages = () => {
                 setShowForward(true);
               }}
             >
-              📤 Forward
+               Forward
             </button>
             {isMine(activeMsg) && (
               <button
@@ -347,7 +346,7 @@ const Messages = () => {
                   setShowDelete(true);
                 }}
               >
-                🗑️ Delete
+                 Delete
               </button>
             )}
           </div>

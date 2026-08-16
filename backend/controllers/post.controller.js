@@ -68,7 +68,7 @@ export const addNewPost = async (req, res) => {
             .toFormat('jpeg', { quality: 80 })
             .toBuffer();
 
-        // AI moderation gate — reject before we ever upload to Cloudinary or hit the DB.
+        // AI moderation — reject before we ever upload to Cloudinary or hit the DB.
         const moderation = await moderateContent(optimizedImageBuffer, caption);
         if (!moderation.safe) {
             return res.status(400).json({

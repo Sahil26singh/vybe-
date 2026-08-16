@@ -3,8 +3,6 @@ import { getReceiverSocketId, io } from "../socket/socket.js";
 import {Message} from "../models/message.model.js"
 import { Notification } from "../models/notification.model.js";
 
-// for chatting
-// --- REPLACE: sendMessage function (paste this over your existing sendMessage) ---
 export const sendMessage = async (req, res) => {
   try {
     const senderId = req.id;
@@ -54,12 +52,12 @@ export const sendMessage = async (req, res) => {
             createdAt: notif.createdAt
           });
 
-          // also emit the newMessage realtime event (so receiver's chat UI can show message)
+          // also emit the newMessage realtime
           io.to(receiverSocketId).emit("newMessage", newMessage);
         }
       }
     } catch (emitErr) {
-      // don't crash the request if emit fails — log for debugging
+      // don't crash the request if emit fails 
       console.error("emit newNotification/newMessage error:", emitErr);
     }
 
@@ -69,8 +67,6 @@ export const sendMessage = async (req, res) => {
     return res.status(500).json({ success: false, message: "Failed to send message" });
   }
 };
-// --- END REPLACE ---
-
 
 export const getMessage = async (req,res) => {
     try {
@@ -89,7 +85,7 @@ export const getMessage = async (req,res) => {
     }
 }
 
-// Edit a message (sender only)
+// Edit message (sender only)
 export const editMessage = async (req, res) => {
   try {
     const userId = req.id;

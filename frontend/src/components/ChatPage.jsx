@@ -120,7 +120,6 @@ const ChatPage = () => {
       });
   }, [routeUserId, connectedUsers, navigate]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       setSelectedUser(null);

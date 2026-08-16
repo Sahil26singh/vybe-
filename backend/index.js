@@ -45,10 +45,10 @@ const startServer = async () => {
   try {
     await connectDB(); 
     server.listen(PORT, () => {
-      console.log(`✅ Server is listening at port ${PORT}`);
+      console.log(`Server is listening at port ${PORT}`);
     });
   } catch (err) {
-    console.error("❌ Failed to start server:", err);
+    console.error("Failed to start server:", err);
     process.exit(1);
   }
 };

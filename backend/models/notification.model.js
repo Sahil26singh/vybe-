@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 
 const NotificationSchema = new mongoose.Schema({
   to: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },   // receiver
-  from: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: false },// actor 
+  from: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: false },// sender
   type: { type: String, enum: ["like","follow","message","comment","other"], required: true },
   read: { type: Boolean, default: false },
   opened: { type: Boolean, default: false }, 

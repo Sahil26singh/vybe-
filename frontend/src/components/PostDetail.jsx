@@ -8,7 +8,6 @@ import { MessageCircle, Send, Bookmark, BookmarkCheck, ArrowLeft } from "lucide-
 import { Button } from "./ui/button";
 import { toast } from "sonner";
 
-// Handle both plain ID strings and populated user objects { _id, username, ... }
 const idStr = (x) => {
   if (!x) return "";
   if (typeof x === "string") return x;

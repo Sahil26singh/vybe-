@@ -5,7 +5,6 @@ const isValidKey = apiKey && !apiKey.toLowerCase().includes("your_") && apiKey.l
 
 const genAI = isValidKey ? new GoogleGenerativeAI(apiKey) : null;
 
-// Candidate generation models to auto-try in order of preference
 const CANDIDATE_MODELS = [
     "gemini-1.5-flash-latest",
     "gemini-1.5-pro-latest",
@@ -18,7 +17,6 @@ const CANDIDATE_MODELS = [
     "gemini-3.5-flash-lite"
 ];
 
-// Candidate embedding models
 const CANDIDATE_EMBEDDING_MODELS = [
     "text-embedding-004",
     "embedding-001",
@@ -35,9 +33,6 @@ const bufferToInlinePart = (imageBuffer) => ({
     },
 });
 
-/**
- * Executes a Gemini prompt with automatic model fallback if a model is 404/deprecated.
- */
 const generateContentWithFallback = async (contents, options = {}) => {
     if (!genAI) throw new Error("Google AI API Key not configured");
 
@@ -65,9 +60,7 @@ const generateContentWithFallback = async (contents, options = {}) => {
     throw lastError || new Error("No available Gemini model succeeded");
 };
 
-/**
- * Generates a short, descriptive alt-text string for an image.
- */
+
 export const generateAltText = async (imageBuffer) => {
     if (!genAI) return "";
     try {
@@ -82,12 +75,9 @@ export const generateAltText = async (imageBuffer) => {
     }
 };
 
-/**
- * Generates an engaging social media caption with hashtags for an image.
- */
 export const generateAICaption = async (imageBuffer) => {
     if (!genAI) {
-        return "Peaceful moments and good vibes ✨🌅 #sunset #peace #vibes";
+        return "Peaceful moments and good vibes.  #sunset #peace #vibes";
     }
     try {
         const result = await generateContentWithFallback([
@@ -97,7 +87,7 @@ export const generateAICaption = async (imageBuffer) => {
         return result.response.text().trim();
     } catch (error) {
         console.log("generateAICaption error:", error.message);
-        return "Catching sunsets and quiet thoughts ✨🌅 #sunset #peace #vibes";
+        return "Catching sunsets and quiet thoughts  #sunset #peace #vibes";
     }
 };
 
@@ -137,7 +127,6 @@ Respond ONLY with JSON: {"safe": boolean, "reason": string}. "reason" should be 
 export const generateUserEmbedding = async (text) => {
     if (!text || !text.trim()) return [];
 
-    // 1. Try Gemini AI if valid API key exists
     if (genAI) {
         const modelsToTry = workingEmbeddingModelName
             ? [workingEmbeddingModelName, ...CANDIDATE_EMBEDDING_MODELS.filter((m) => m !== workingEmbeddingModelName)]
@@ -174,7 +163,7 @@ export const generateUserEmbedding = async (text) => {
         vector[idx2] += 0.5;
     }
 
-    // Normalize vector (Unit L2 norm) for Cosine Similarity
+    // Normalize vector (Unit L2 norm-euclidean distance) for Cosine Similarity
     let norm = 0;
     for (let i = 0; i < dim; i++) norm += vector[i] * vector[i];
     norm = Math.sqrt(norm);

@@ -7,7 +7,7 @@ const connectDB = async() => {
         console.log("mongo db connected");
     } catch (error) {
         console.log(error);
-        throw error; // let the caller (startServer) decide to exit instead of listening with a dead DB
+        throw error; 
     }
 }
 export default connectDB;

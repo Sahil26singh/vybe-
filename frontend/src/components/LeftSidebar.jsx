@@ -35,7 +35,6 @@ const LeftSidebar = () => {
   const [connectionsLoading, setConnectionsLoading] = useState(false);
   const [connectionsError, setConnectionsError] = useState(null);
 
-  // Keep Create highlight
   useEffect(() => {
     if (open) setManualActive("Create");
     else if (manualActive === "Create") setManualActive(null);

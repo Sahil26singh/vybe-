@@ -154,9 +154,7 @@ export const AppProvider = ({ children }) => {
       setSocket(socketio);
     }
 
-    // Always (re-)attach handlers with named functions so cleanup can remove them precisely.
-    // In socket.io v4, the "connect" event fires on BOTH initial connection AND every
-    // successful reconnection — making it the correct place to re-register the userId.
+    // successful reconnection —  re-register the userId.
     const socketio = socketRef.current;
 
     const onConnect = () => {
