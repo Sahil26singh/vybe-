@@ -108,7 +108,7 @@ export default function Notification() {
                     <strong>{n.from?.username || "Someone"}</strong>
                   </div>
                   <div className="text-sm text-blue-500">
-                    {n.message || (n.type === "like" ? "Liked your post" : "") || (n.type === "message" ? "Send you new message" : "") || (n.type === "follow" ? "Started following you" : "")}
+                    {n.message || (n.type === "like" ? "Liked your post" : "") || (n.type === "comment" ? "Commented on your post" : "") || (n.type === "message" ? "Send you new message" : "") || (n.type === "follow" ? "Started following you" : "")}
                   </div>
                   <div className="text-xs text-gray-400 mt-1">{n.createdAt ? new Date(n.createdAt).toLocaleString() : ""}</div>
                 </div>

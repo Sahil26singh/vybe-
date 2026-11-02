@@ -5,23 +5,24 @@ const isValidKey = apiKey && !apiKey.toLowerCase().includes("your_") && apiKey.l
 
 const genAI = isValidKey ? new GoogleGenerativeAI(apiKey) : null;
 
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
+const GEMINI_EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-2";
+
+// Real Google Gemini models with fallback cascade
 const CANDIDATE_MODELS = [
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-pro-latest",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash-exp",
-    "gemini-1.5-flash-001",
-    "gemini-1.5-flash-002",
-    "gemini-1.5-pro",
-    "gemini-pro-vision",
-    "gemini-3.5-flash-lite"
-];
+    GEMINI_MODEL,
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.8-flash",
+    "gemini-2.5-flash"
+].filter((v, i, a) => a.indexOf(v) === i);
 
 const CANDIDATE_EMBEDDING_MODELS = [
-    "text-embedding-004",
-    "embedding-001",
-    "text-embedding-001"
-];
+    GEMINI_EMBEDDING_MODEL,
+    "gemini-embedding-2",
+    "gemini-embedding-001"
+].filter((v, i, a) => a.indexOf(v) === i);
 
 let workingModelName = null;
 let workingEmbeddingModelName = null;
@@ -51,7 +52,19 @@ const generateContentWithFallback = async (contents, options = {}) => {
             }
         } catch (err) {
             lastError = err;
-            if (err.message?.includes("404") || err.message?.includes("not found")) {
+            const isRetryable =
+                err.status === 404 ||
+                err.status === 429 ||
+                err.status === 503 ||
+                err.message?.includes("404") ||
+                err.message?.includes("not found") ||
+                err.message?.includes("503") ||
+                err.message?.includes("high demand") ||
+                err.message?.includes("quota") ||
+                err.message?.includes("RESOURCE_EXHAUSTED");
+
+            if (isRetryable) {
+                console.log(`[Gemini Fallback] Model [${modelName}] failed (${err.message?.slice(0, 80)}). Trying next candidate...`);
                 continue;
             }
             throw err;
@@ -59,7 +72,6 @@ const generateContentWithFallback = async (contents, options = {}) => {
     }
     throw lastError || new Error("No available Gemini model succeeded");
 };
-
 
 export const generateAltText = async (imageBuffer) => {
     if (!genAI) return "";
@@ -77,25 +89,30 @@ export const generateAltText = async (imageBuffer) => {
 
 export const generateAICaption = async (imageBuffer) => {
     if (!genAI) {
-        return "Peaceful moments and good vibes.  #sunset #peace #vibes";
+        throw new Error("AI service is not configured");
     }
-    try {
-        const result = await generateContentWithFallback([
-            "Write an engaging, aesthetic social media caption for this image. Include 2-3 emojis and 2-3 relevant trending hashtags. Keep it under 2 sentences.",
-            bufferToInlinePart(imageBuffer),
-        ]);
-        return result.response.text().trim();
-    } catch (error) {
-        console.log("generateAICaption error:", error.message);
-        return "Catching sunsets and quiet thoughts  #sunset #peace #vibes";
+    const result = await generateContentWithFallback([
+        "Write an engaging, aesthetic social media caption for this image. Include 2-3 emojis and 2-3 relevant trending hashtags. Keep it under 2 sentences.",
+        bufferToInlinePart(imageBuffer),
+    ]);
+    const text = result?.response?.text()?.trim();
+    if (!text) {
+        throw new Error("Could not generate a caption");
     }
+    return text;
 };
 
 /**
  * Checks an image + caption for policy violations.
+ * Fail-secure policy: if moderation fails or cannot be verified, blocks the post.
  */
 export const moderateContent = async (imageBuffer, caption = "") => {
-    if (!genAI) return { safe: true, reason: "" };
+    if (!genAI) {
+        return {
+            safe: false,
+            reason: "Content moderation check could not be completed. Please try again later.",
+        };
+    }
     try {
         const prompt = `You are a content moderation classifier for a social media app.
 Look at this image and caption, and decide if it violates policy.
@@ -116,16 +133,22 @@ Respond ONLY with JSON: {"safe": boolean, "reason": string}. "reason" should be 
         };
     } catch (error) {
         console.log("moderateContent error:", error.message);
-        return { safe: true, reason: "" };
+        return {
+            safe: false,
+            reason: "Content moderation check could not be completed. Please try again later.",
+        };
     }
 };
 
 /**
  * Generates a 768-dimensional vector embedding for user text.
- * Uses Gemini embedding model if API key is present with fallback vector.
+ * Uses Gemini embedding model with Matryoshka outputDimensionality (768) and fallback.
+ * Returns an object: { values: number[], source: "gemini" | "fallback" }
  */
 export const generateUserEmbedding = async (text) => {
-    if (!text || !text.trim()) return [];
+    if (!text || !text.trim()) return null;
+
+    const TARGET_DIM = 768;
 
     if (genAI) {
         const modelsToTry = workingEmbeddingModelName
@@ -135,23 +158,38 @@ export const generateUserEmbedding = async (text) => {
         for (const modelName of modelsToTry) {
             try {
                 const model = genAI.getGenerativeModel({ model: modelName });
-                const result = await model.embedContent(text.trim());
-                if (result?.embedding?.values?.length) {
+                const result = await model.embedContent({
+                    content: { parts: [{ text: text.trim() }] },
+                    outputDimensionality: TARGET_DIM,
+                });
+                let values = result?.embedding?.values;
+                if (values?.length) {
+                    if (values.length > TARGET_DIM) {
+                        values = values.slice(0, TARGET_DIM);
+                    }
+                    // Unit L2 normalization
+                    let norm = 0;
+                    for (let i = 0; i < values.length; i++) norm += values[i] * values[i];
+                    norm = Math.sqrt(norm);
+                    if (norm > 0) {
+                        for (let i = 0; i < values.length; i++) values[i] /= norm;
+                    }
+
                     workingEmbeddingModelName = modelName; // Cache working embedding model
-                    return result.embedding.values;
+                    return {
+                        values,
+                        source: "gemini",
+                    };
                 }
             } catch (error) {
-                if (error.message?.includes("404") || error.message?.includes("not found")) {
-                    continue; // Try next embedding model candidate
-                }
-                console.log(`Gemini embedding model [${modelName}] error:`, error.message);
-                break;
+                console.log(`[Gemini Embedding Fallback] Model [${modelName}] error: ${error.message?.slice(0, 80)}. Trying next...`);
+                continue;
             }
         }
     }
 
-    // 2. Fallback: Generate deterministic 768-dim normalized feature vector
-    const dim = 768;
+    // Fallback: Generate deterministic 768-dim normalized feature vector
+    const dim = TARGET_DIM;
     const vector = new Array(dim).fill(0);
     const cleaned = text.toLowerCase().replace(/[^a-z0-9\s]/g, "");
 
@@ -171,7 +209,10 @@ export const generateUserEmbedding = async (text) => {
         for (let i = 0; i < dim; i++) vector[i] /= norm;
     }
 
-    return vector;
+    return {
+        values: vector,
+        source: "fallback",
+    };
 };
 
 /**

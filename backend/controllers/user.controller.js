@@ -16,13 +16,14 @@ export const updateUserEmbedding = async (userId) => {
     const recentPosts = await Post.find({ author: userId }).sort({ createdAt: -1 }).limit(5).select("caption");
     const postText = recentPosts.map(p => p.caption).filter(Boolean).join(". ");
     const profileText = `Username: ${user.username}. Bio: ${user.bio || "No bio"}. Gender: ${user.gender || ""}. Posts: ${postText}`;
-    const embedding = await generateUserEmbedding(profileText);
-    if (embedding && embedding.length > 0) {
-      user.embedding = embedding;
+    const result = await generateUserEmbedding(profileText);
+    if (result && result.values && result.values.length > 0) {
+      user.embedding = result.values;
+      user.embeddingSource = result.source;
       user.embeddingUpdatedAt = new Date();
       user.markModified("embedding");
       await user.save();
-      console.log(` [Vector Embedding] Generated ${embedding.length}-dim vector for user @${user.username}`);
+      console.log(` [Vector Embedding] Generated (${result.source}) ${result.values.length}-dim vector for user @${user.username}`);
     }
   } catch (err) {
     console.error("updateUserEmbedding error:", err.message);
@@ -139,20 +140,48 @@ export const searchUsersByUsername = async (req, res) => {
 
 export const register = async (req, res) => {
     try {
-        const { username, email, password } = req.body;
+        const username = (req.body.username || "").trim();
+        const email = (req.body.email || "").trim().toLowerCase();
+        const password = req.body.password;
+
         if (!username || !email || !password) {
-            return res.status(401).json({
-                message: "Something is missing, please check!",
+            return res.status(400).json({
+                message: "Username, email, and password are required.",
                 success: false,
             });
         }
-        const user = await User.findOne({ email });
-        if (user) {
-            return res.status(401).json({
-                message: "Try different email",
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                message: "Please provide a valid email address.",
                 success: false,
             });
         }
+
+        if (password.length < 6) {
+            return res.status(400).json({
+                message: "Password must be at least 6 characters long.",
+                success: false,
+            });
+        }
+
+        const existingEmail = await User.findOne({ email });
+        if (existingEmail) {
+            return res.status(409).json({
+                message: "An account with this email already exists.",
+                success: false,
+            });
+        }
+
+        const existingUsername = await User.findOne({ username });
+        if (existingUsername) {
+            return res.status(409).json({
+                message: "Username is already taken.",
+                success: false,
+            });
+        }
+
         const hashedPassword = await bcrypt.hash(password, 10);
         await User.create({
             username,
@@ -164,6 +193,12 @@ export const register = async (req, res) => {
             success: true,
         });
     } catch (error) {
+        if (error.code === 11000) {
+            return res.status(409).json({
+                message: "Username or email is already registered.",
+                success: false,
+            });
+        }
         console.log(error);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
@@ -171,13 +206,24 @@ export const register = async (req, res) => {
 
 export const login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const email = (req.body.email || "").trim().toLowerCase();
+        const password = req.body.password;
+
         if (!email || !password) {
-            return res.status(401).json({
-                message: "Something is missing, please check!",
+            return res.status(400).json({
+                message: "Email and password are required.",
                 success: false,
             });
         }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                message: "Please provide a valid email address.",
+                success: false,
+            });
+        }
+
         let user = await User.findOne({ email });
         if (!user) {
             return res.status(401).json({
@@ -252,7 +298,27 @@ export const logout = async (_, res) => {
 export const getProfile = async (req, res) => {
     try {
         const userId = req.params.id;
-        let user = await User.findById(userId).populate({path:'posts', options:{sort:{createdAt:-1}}}).populate('bookmarks').select('-password');
+        const isOwnProfile = String(req.id) === String(userId);
+
+        let query = User.findById(userId).populate({
+            path: 'posts',
+            options: { sort: { createdAt: -1 } }
+        });
+
+        if (isOwnProfile) {
+            query = query.populate('bookmarks').select('-password -embedding');
+        } else {
+            query = query.select('-password -email -embedding -bookmarks');
+        }
+
+        const user = await query;
+        if (!user) {
+            return res.status(404).json({
+                message: 'User not found.',
+                success: false
+            });
+        }
+
         return res.status(200).json({
             user,
             success: true
@@ -306,17 +372,20 @@ export const editProfile = async (req, res) => {
 export const getSuggestedUsers = async (req, res) => {
     try {
         const loggedInUserId = req.id;
-        const loggedInUser = await User.findById(loggedInUserId).select("following embedding bio gender username");
+        const loggedInUser = await User.findById(loggedInUserId).select("following embedding embeddingSource bio gender username");
 
         if (!loggedInUser) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        // If logged-in user does not have an embedding vector yet, generate one
-        if (!loggedInUser.embedding || loggedInUser.embedding.length === 0) {
+        // If logged-in user does not have an embedding vector or source yet, generate one
+        if (!loggedInUser.embedding || loggedInUser.embedding.length === 0 || !loggedInUser.embeddingSource) {
             await updateUserEmbedding(loggedInUserId);
-            const reloaded = await User.findById(loggedInUserId).select("embedding");
-            if (reloaded) loggedInUser.embedding = reloaded.embedding;
+            const reloaded = await User.findById(loggedInUserId).select("embedding embeddingSource");
+            if (reloaded) {
+                loggedInUser.embedding = reloaded.embedding;
+                loggedInUser.embeddingSource = reloaded.embeddingSource;
+            }
         }
 
         // Exclude self + users already being followed
@@ -325,38 +394,48 @@ export const getSuggestedUsers = async (req, res) => {
 
         // Fetch candidate users not followed yet
         const candidates = await User.find({ _id: { $nin: excludeIds } })
-            .select("-password")
+            .select("-password -email -bookmarks")
             .lean();
 
         // Generate missing candidate embeddings in parallel (fast & non-blocking)
-        const missingCandidates = candidates.filter(c => !c.embedding || c.embedding.length === 0);
+        const missingCandidates = candidates.filter(c => !c.embedding || c.embedding.length === 0 || !c.embeddingSource);
         if (missingCandidates.length > 0) {
             await Promise.all(missingCandidates.map(async (cand) => {
                 await updateUserEmbedding(cand._id);
-                const reloaded = await User.findById(cand._id).select("embedding").lean();
-                if (reloaded) cand.embedding = reloaded.embedding;
+                const reloaded = await User.findById(cand._id).select("embedding embeddingSource").lean();
+                if (reloaded) {
+                    cand.embedding = reloaded.embedding;
+                    cand.embeddingSource = reloaded.embeddingSource;
+                }
             }));
         }
 
-        // Score candidates using Cosine Similarity
+        // Score candidates using Cosine Similarity only when embeddingSource matches
         if (loggedInUser.embedding && loggedInUser.embedding.length > 0) {
             const rankedUsers = candidates.map(user => {
                 let score = 0;
-                if (user.embedding && user.embedding.length === loggedInUser.embedding.length) {
+                const sameSource = Boolean(
+                    loggedInUser.embeddingSource &&
+                    user.embeddingSource &&
+                    loggedInUser.embeddingSource === user.embeddingSource
+                );
+                if (sameSource && user.embedding && user.embedding.length === loggedInUser.embedding.length) {
                     score = calculateCosineSimilarity(loggedInUser.embedding, user.embedding);
                 }
-                return { ...user, similarityScore: score };
+                const { embedding, embeddingSource, ...rest } = user;
+                return { ...rest, similarityScore: score };
             });
 
             // Sort descending by similarityScore, then by newest
             rankedUsers.sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0));
-            console.log(`🔍 [Vector Search] Scored ${rankedUsers.length} candidates using Cosine Similarity. Top match: @${rankedUsers[0]?.username} (Score: ${rankedUsers[0]?.similarityScore?.toFixed(4) || 0})`);
+            console.log(`🔍 [Vector Search] Scored ${rankedUsers.length} candidates using Cosine Similarity (${loggedInUser.embeddingSource || "none"}). Top match: @${rankedUsers[0]?.username} (Score: ${rankedUsers[0]?.similarityScore?.toFixed(4) || 0})`);
             return res.status(200).json({ success: true, users: rankedUsers });
         }
 
+        const sanitizedCandidates = candidates.map(({ embedding, embeddingSource, ...rest }) => rest);
         return res.status(200).json({
             success: true,
-            users: candidates
+            users: sanitizedCandidates
         });
     } catch (error) {
         console.error("getSuggestedUsers error:", error);

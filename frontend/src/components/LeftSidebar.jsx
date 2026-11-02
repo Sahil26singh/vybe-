@@ -47,7 +47,7 @@ const LeftSidebar = () => {
   // Logout
   const logoutHandler = async () => {
     try {
-      const res = await api.get(`${API_BASE}/api/v1/user/logout`, {
+      const res = await api.post(`${API_BASE}/api/v1/user/logout`, {}, {
         withCredentials: true,
       });
       if (res.data.success) {

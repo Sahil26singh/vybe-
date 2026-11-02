@@ -58,7 +58,7 @@ const Post = ({ post }) => {
       setPosts(updatedPosts);
       toast.success(liked ? "Post disliked" : "Post liked");
 
-      await api.get(`${API_URL}/api/v1/post/${post._id}/${action}`, { withCredentials: true });
+      await api.post(`${API_URL}/api/v1/post/${post._id}/${action}`, {}, { withCredentials: true });
     } catch (error) {
       const reverted = posts.map((p) =>
         idStr(p._id) === idStr(post._id)
@@ -139,7 +139,7 @@ const Post = ({ post }) => {
     setPosts(nextPosts);
 
     try {
-      const res = await api.get(`${API_URL}/api/v1/post/${post?._id}/bookmark`, { withCredentials: true });
+      const res = await api.post(`${API_URL}/api/v1/post/${post?._id}/bookmark`, {}, { withCredentials: true });
 
       if (res?.data?.success) {
         if (res.data.user) {

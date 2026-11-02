@@ -117,7 +117,7 @@ export const getAllPost = async (req, res) => {
             .populate({ path: 'author', select: 'username profilePicture' })
             .populate({
                 path: 'comments',
-                sort: { createdAt: -1 },
+                options: { sort: { createdAt: -1 } },
                 populate: {
                     path: 'author',
                     select: 'username profilePicture'
@@ -142,7 +142,7 @@ export const getUserPost = async (req, res) => {
             select: 'username profilePicture'
         }).populate({
             path: 'comments',
-            sort: { createdAt: -1 },
+            options: { sort: { createdAt: -1 } },
             populate: {
                 path: 'author',
                 select: 'username profilePicture'
@@ -241,13 +241,13 @@ export const addComment = async (req,res) =>{
         const commentKrneWalaUserKiId = req.id;
 
         const {text} = req.body;
+        if(!text || !text.trim()) return res.status(400).json({message:'text is required', success:false});
 
         const post = await Post.findById(postId);
-
-        if(!text) return res.status(400).json({message:'text is required', success:false});
+        if(!post) return res.status(404).json({message:'Post not found', success:false});
 
         const comment = await Comment.create({
-            text,
+            text: text.trim(),
             author:commentKrneWalaUserKiId,
             post:postId
         });
@@ -259,6 +259,32 @@ export const addComment = async (req,res) =>{
         
         post.comments.push(comment._id);
         await post.save();
+
+        const postOwnerId = String(post.author);
+        if (postOwnerId !== String(commentKrneWalaUserKiId)) {
+            const user = await User.findById(commentKrneWalaUserKiId).select("username profilePicture");
+            const notif = await Notification.create({
+                to: postOwnerId,
+                from: commentKrneWalaUserKiId,
+                type: "comment",
+                data: { postId: post._id, commentId: comment._id, text: comment.text, commenterUsername: user?.username || "" }
+            });
+
+            try {
+                const socketId = getReceiverSocketId(postOwnerId);
+                if (socketId && io) {
+                    io.to(socketId).emit("newNotification", {
+                        _id: notif._id,
+                        from: { _id: commentKrneWalaUserKiId, username: user?.username || "" },
+                        type: notif.type,
+                        data: notif.data,
+                        createdAt: notif.createdAt
+                    });
+                }
+            } catch (emitErr) {
+                console.error("emit newNotification (comment) error:", emitErr);
+            }
+        }
 
         return res.status(201).json({
             message:'Comment Added',
@@ -276,7 +302,7 @@ export const getCommentsOfPost = async (req,res) => {
     try {
         const postId = req.params.id;
 
-        const comments = await Comment.find({post:postId}).populate('author', 'username profilePicture');
+        const comments = await Comment.find({post:postId}).sort({ createdAt: -1 }).populate('author', 'username profilePicture');
 
         if(!comments) return res.status(404).json({message:'No comments found for this post', success:false});
 
@@ -361,6 +387,6 @@ export const generateCaption = async (req, res) => {
     return res.status(200).json({ success: true, caption });
   } catch (error) {
     console.error("generateCaption error:", error);
-    return res.status(500).json({ success: false, message: "Failed to generate AI caption" });
+    return res.status(500).json({ success: false, message: "Couldn't generate a caption" });
   }
 };

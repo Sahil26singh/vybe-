@@ -2,13 +2,16 @@ import { useApp } from "@/context/AppContext";
 import { useEffect } from "react";
 
 const useGetRTM = () => {
-  const { socket, setMessages } = useApp();
+  const { socket, setMessages, selectedUser } = useApp();
 
   useEffect(() => {
     if (!socket) return;
 
     const handleNewMessage = (newMessage) => {
       if (!newMessage?._id) return;
+      const senderId = newMessage.senderId?._id ? String(newMessage.senderId._id) : String(newMessage.senderId);
+      if (senderId !== String(selectedUser?._id)) return;
+
       setMessages((prev) => {
         // Deduplicate: skip if a message with this _id already exists
         if ((prev || []).some((m) => m._id === newMessage._id)) return prev;
@@ -38,7 +41,7 @@ const useGetRTM = () => {
       socket.off("messageEdited", handleMessageEdited);
       socket.off("messageDeleted", handleMessageDeleted);
     };
-  }, [socket, setMessages]);
+  }, [socket, setMessages, selectedUser?._id]);
 };
 
 export default useGetRTM;

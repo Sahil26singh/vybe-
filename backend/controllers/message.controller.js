@@ -2,12 +2,28 @@ import {Conversation} from "../models/conversation.model.js";
 import { getReceiverSocketId, io } from "../socket/socket.js";
 import {Message} from "../models/message.model.js"
 import { Notification } from "../models/notification.model.js";
+import { User } from "../models/user.model.js";
 
 export const sendMessage = async (req, res) => {
   try {
     const senderId = req.id;
     const receiverId = req.params.id;
     const { textMessage: message } = req.body;
+
+    if (!message || !message.trim()) {
+      return res.status(400).json({ success: false, message: "Message text cannot be empty" });
+    }
+
+    if (String(senderId) === String(receiverId)) {
+      return res.status(400).json({ success: false, message: "Cannot send message to yourself" });
+    }
+
+    const receiver = await User.findById(receiverId);
+    if (!receiver) {
+      return res.status(404).json({ success: false, message: "Receiver not found" });
+    }
+
+    const trimmedMessage = message.trim();
 
     // find or create conversation
     let conversation = await Conversation.findOne({
@@ -24,7 +40,7 @@ export const sendMessage = async (req, res) => {
     const newMessage = await Message.create({
       senderId,
       receiverId,
-      message
+      message: trimmedMessage
     });
 
     // push message id into conversation and save conversation
@@ -162,7 +178,10 @@ export const forwardMessage = async (req, res) => {
     if (!toUserId) {
       return res.status(400).json({ success: false, message: "toUserId is required" });
     }
-    const original = await Message.findById(messageId);
+    const original = await Message.findOne({
+      _id: messageId,
+      $or: [{ senderId }, { receiverId: senderId }],
+    });
     if (!original) return res.status(404).json({ success: false, message: "Original message not found" });
 
     // find or create conversation between sender and toUserId

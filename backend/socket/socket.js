@@ -1,7 +1,7 @@
 import { Server } from "socket.io";
 import express from "express";
 import http from "http";
-
+import jwt from "jsonwebtoken";
 
 const app = express();
 
@@ -22,29 +22,42 @@ const io = new Server(server, {
     allowEIO3: true,
     pingTimeout: 60000,
     pingInterval: 25000,
-})
+});
+
+io.use((socket, next) => {
+    try {
+        const raw = socket.handshake.headers.cookie || "";
+        const token = raw
+            .split(";")
+            .map(c => c.trim())
+            .find(c => c.startsWith("token="))
+            ?.split("=")[1];
+        if (!token) {
+            return next(new Error("Unauthorized"));
+        }
+        const { userId } = jwt.verify(token, process.env.SECRET_KEY);
+        if (!userId) {
+            return next(new Error("Unauthorized"));
+        }
+        socket.userId = userId;   // use this instead of the query userId
+        next();
+    } catch {
+        next(new Error("Unauthorized"));
+    }
+});
 
 const userSocketMap = {}; //userId -> socketId
 
 export const getReceiverSocketId = (receiverId) => userSocketMap[receiverId];
 
 io.on('connection', async (socket) => {
-    const userId = socket.handshake.query.userId;
+    const userId = socket.userId;
     if (userId) {
         userSocketMap[userId] = socket.id;
         console.log(`User connected: ${userId} -> ${socket.id}`);
     }
 
     io.emit('getOnlineUsers', Object.keys(userSocketMap));
-
-    // Allow client to re-register userId after a reconnect
-    socket.on('registerUser', (uid) => {
-        if (uid) {
-            userSocketMap[uid] = socket.id;
-            console.log(`User re-registered: ${uid} -> ${socket.id}`);
-            io.emit('getOnlineUsers', Object.keys(userSocketMap));
-        }
-    });
 
     socket.on('disconnect', () => {
         if (userId) {
@@ -53,6 +66,6 @@ io.on('connection', async (socket) => {
         }
         io.emit('getOnlineUsers', Object.keys(userSocketMap));
     });
-})
+});
 
 export { app, server, io };
