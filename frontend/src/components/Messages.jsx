@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import api, { API_URL } from "@/lib/axios";
+import api from "@/lib/axios";
 import { useApp } from "@/context/AppContext";
 import useGetAllMessage from "@/hooks/useGetAllMessage";
 import useGetRTM from "@/hooks/useGetRTM";
@@ -7,9 +7,9 @@ import useGetSuggestedUsers from "@/hooks/useGetSuggestedUsers";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Button } from "./ui/button";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
-const API_BASE = API_URL;
-const MESSAGE_API = `${API_BASE}/api/v1/message`;
+const MESSAGE_API = "/api/v1/message";
 
 const idStr = (v) => (v == null ? "" : String(v));
 const safe = (v, fallback = "") => (v == null ? fallback : v);
@@ -100,14 +100,59 @@ const Messages = () => {
   useGetAllMessage();
   useGetSuggestedUsers();
 
-  const { messages, setMessages, user, suggestedUsers } = useApp();
+  const { messages, setMessages, user, selectedUser } = useApp();
   const containerRef = useRef(null);
   const bottomRef = useRef(null);
 
-  // Auto-scroll to the bottom whenever messages change
+  const [page, setPage] = useState(1);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    setPage(1);
+    setHasMoreMessages(true);
+    setLoadingOlder(false);
+  }, [selectedUser?._id]);
+
+  const loadOlderMessages = async () => {
+    if (loadingOlder || !hasMoreMessages || !selectedUser?._id) return;
+    setLoadingOlder(true);
+    try {
+      const oldestMsg = (messages || [])[0];
+      const oldestId = oldestMsg?._id;
+      const url = oldestId
+        ? `${MESSAGE_API}/all/${selectedUser._id}?before=${oldestId}&limit=50`
+        : `${MESSAGE_API}/all/${selectedUser._id}?page=${page + 1}&limit=50`;
+
+      const res = await api.get(url);
+      if (res.data?.success && Array.isArray(res.data.messages)) {
+        if (res.data.messages.length === 0) {
+          setHasMoreMessages(false);
+        } else {
+          setMessages((prev) => {
+            const existingIds = new Set((prev || []).map((m) => String(m._id)));
+            const newOldMessages = res.data.messages.filter((m) => !existingIds.has(String(m._id)));
+            return [...newOldMessages, ...(prev || [])];
+          });
+          setPage((p) => p + 1);
+          if (res.data.hasMore !== undefined) {
+            setHasMoreMessages(res.data.hasMore);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("loadOlderMessages error:", err);
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  // Auto-scroll to the bottom whenever messages change on first load
+  useEffect(() => {
+    if (page === 1) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, page]);
 
   const [activeMsg, setActiveMsg] = useState(null);
 
@@ -128,8 +173,8 @@ const Messages = () => {
     const fetchConnections = async () => {
       try {
         const [followersRes, followingRes] = await Promise.all([
-          api.get(`${API_URL}/api/v1/user/${user._id}/followers`, { withCredentials: true }),
-          api.get(`${API_URL}/api/v1/user/${user._id}/following`, { withCredentials: true }),
+          api.get(`/api/v1/user/${user._id}/followers`),
+          api.get(`/api/v1/user/${user._id}/following`),
         ]);
 
         const followersList = followersRes.data?.success ? followersRes.data.users : [];
@@ -198,18 +243,19 @@ const Messages = () => {
 
       const res = await api.put(
         `${MESSAGE_API}/${m._id}`,
-        { text: nextTextRaw },
-        { withCredentials: true }
+        { text: nextTextRaw }
       );
 
       if (res.data?.success && res.data.message) {
         setMessages((prev) =>
           prev.map((x) => (x._id === m._id ? res.data.message : x))
         );
+        toast.success("Message edited");
       }
       closeAll();
     } catch (e) {
       console.error(e);
+      toast.error(e.response?.data?.message || "Failed to edit message");
       closeAll();
     }
   };
@@ -219,10 +265,12 @@ const Messages = () => {
     if (!m) return;
     try {
       setMessages(messages.filter((x) => x._id !== m._id));
-      await api.delete(`${MESSAGE_API}/${m._id}`, { withCredentials: true });
+      await api.delete(`${MESSAGE_API}/${m._id}`);
+      toast.success("Message deleted");
       closeAll();
     } catch (e) {
       console.error(e);
+      toast.error(e.response?.data?.message || "Failed to delete message");
       closeAll();
     }
   };
@@ -233,14 +281,15 @@ const Messages = () => {
     try {
       await api.post(
         `${MESSAGE_API}/forward/${m._id}`,
-        { toUserId: u._id },
-        { withCredentials: true }
+        { toUserId: u._id }
       );
+      toast.success(`Message forwarded to @${u.username}`);
       setShowForward(false);
       setShowAction(false);
       setActiveMsg(null);
     } catch (e) {
       console.error(e);
+      toast.error(e.response?.data?.message || "Failed to forward message");
     }
   };
 
@@ -308,6 +357,19 @@ const Messages = () => {
       <div className="overflow-y-auto flex-1 p-4" ref={containerRef}>
         <div className="flex justify-center">
           <div className="max-w-2xl w-full">
+            {hasMoreMessages && messages.length >= 50 && (
+              <div className="flex justify-center mb-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={loadOlderMessages}
+                  disabled={loadingOlder}
+                  className="text-xs text-gray-500 hover:text-gray-800"
+                >
+                  {loadingOlder ? "Loading older messages..." : "Load older messages"}
+                </Button>
+              </div>
+            )}
             {messages.map((m) => renderBubble(m))}
             <div ref={bottomRef} />
           </div>

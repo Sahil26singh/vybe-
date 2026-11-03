@@ -25,12 +25,7 @@ const Login = () => {
         e.preventDefault();
         try {
             setLoading(true);
-            const res = await api.post('/api/v1/user/login', input, {
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                withCredentials: true
-            });
+            const res = await api.post('/api/v1/user/login', input);
             if (res.data.success) {
                 setAuthUser(res.data.user);
                 navigate("/");

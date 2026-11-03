@@ -1,12 +1,15 @@
+import "dotenv/config";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const apiKey = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
-const isValidKey = apiKey && !apiKey.toLowerCase().includes("your_") && apiKey.length > 20;
-
-const genAI = isValidKey ? new GoogleGenerativeAI(apiKey) : null;
+export const getGenAI = () => {
+    const apiKey = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : "";
+    const isValidKey = apiKey && !apiKey.toLowerCase().includes("your_") && apiKey.length > 20;
+    return isValidKey ? new GoogleGenerativeAI(apiKey) : null;
+};
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
-const GEMINI_EMBEDDING_MODEL = process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-2";
+
+export const getEmbeddingModelName = () => (process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-001").trim();
 
 // Real Google Gemini models with fallback cascade
 const CANDIDATE_MODELS = [
@@ -18,14 +21,7 @@ const CANDIDATE_MODELS = [
     "gemini-2.5-flash"
 ].filter((v, i, a) => a.indexOf(v) === i);
 
-const CANDIDATE_EMBEDDING_MODELS = [
-    GEMINI_EMBEDDING_MODEL,
-    "gemini-embedding-2",
-    "gemini-embedding-001"
-].filter((v, i, a) => a.indexOf(v) === i);
-
 let workingModelName = null;
-let workingEmbeddingModelName = null;
 
 const bufferToInlinePart = (imageBuffer) => ({
     inlineData: {
@@ -35,6 +31,7 @@ const bufferToInlinePart = (imageBuffer) => ({
 });
 
 const generateContentWithFallback = async (contents, options = {}) => {
+    const genAI = getGenAI();
     if (!genAI) throw new Error("Google AI API Key not configured");
 
     const modelsToTry = workingModelName
@@ -74,7 +71,7 @@ const generateContentWithFallback = async (contents, options = {}) => {
 };
 
 export const generateAltText = async (imageBuffer) => {
-    if (!genAI) return "";
+    if (!getGenAI()) return "";
     try {
         const result = await generateContentWithFallback([
             "Write a concise, factual alt-text description of this image for accessibility (screen readers). One sentence, no more than 20 words. Do not start with 'Image of' or 'Photo of'.",
@@ -88,7 +85,7 @@ export const generateAltText = async (imageBuffer) => {
 };
 
 export const generateAICaption = async (imageBuffer) => {
-    if (!genAI) {
+    if (!getGenAI()) {
         throw new Error("AI service is not configured");
     }
     const result = await generateContentWithFallback([
@@ -107,7 +104,7 @@ export const generateAICaption = async (imageBuffer) => {
  * Fail-secure policy: if moderation fails or cannot be verified, blocks the post.
  */
 export const moderateContent = async (imageBuffer, caption = "") => {
-    if (!genAI) {
+    if (!getGenAI()) {
         return {
             safe: false,
             reason: "Content moderation check could not be completed. Please try again later.",
@@ -142,95 +139,53 @@ Respond ONLY with JSON: {"safe": boolean, "reason": string}. "reason" should be 
 
 /**
  * Generates a 768-dimensional vector embedding for user text.
- * Uses Gemini embedding model with Matryoshka outputDimensionality (768) and fallback.
- * Returns an object: { values: number[], source: "gemini" | "fallback" }
+ * Uses Gemini embedding model from process.env.GEMINI_EMBEDDING_MODEL (default: gemini-embedding-001).
+ * Requests outputDimensionality: 768 and applies unit L2 normalization.
+ * Returns { values: number[], model: string } on success, or null on failure.
+ * (Synthetic hash fallback has been completely removed).
  */
 export const generateUserEmbedding = async (text) => {
     if (!text || !text.trim()) return null;
+    const genAI = getGenAI();
+    if (!genAI) {
+        console.warn("[Gemini Embedding] genAI client is not configured or API key is missing.");
+        return null;
+    }
 
     const TARGET_DIM = 768;
+    const modelName = getEmbeddingModelName();
 
-    if (genAI) {
-        const modelsToTry = workingEmbeddingModelName
-            ? [workingEmbeddingModelName, ...CANDIDATE_EMBEDDING_MODELS.filter((m) => m !== workingEmbeddingModelName)]
-            : CANDIDATE_EMBEDDING_MODELS;
+    try {
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.embedContent({
+            content: { parts: [{ text: text.trim() }] },
+            outputDimensionality: TARGET_DIM,
+        });
 
-        for (const modelName of modelsToTry) {
-            try {
-                const model = genAI.getGenerativeModel({ model: modelName });
-                const result = await model.embedContent({
-                    content: { parts: [{ text: text.trim() }] },
-                    outputDimensionality: TARGET_DIM,
-                });
-                let values = result?.embedding?.values;
-                if (values?.length) {
-                    if (values.length > TARGET_DIM) {
-                        values = values.slice(0, TARGET_DIM);
-                    }
-                    // Unit L2 normalization
-                    let norm = 0;
-                    for (let i = 0; i < values.length; i++) norm += values[i] * values[i];
-                    norm = Math.sqrt(norm);
-                    if (norm > 0) {
-                        for (let i = 0; i < values.length; i++) values[i] /= norm;
-                    }
-
-                    workingEmbeddingModelName = modelName; // Cache working embedding model
-                    return {
-                        values,
-                        source: "gemini",
-                    };
-                }
-            } catch (error) {
-                console.log(`[Gemini Embedding Fallback] Model [${modelName}] error: ${error.message?.slice(0, 80)}. Trying next...`);
-                continue;
-            }
+        let values = result?.embedding?.values;
+        if (!values || !Array.isArray(values) || values.length === 0) {
+            console.warn(`[Gemini Embedding] Model [${modelName}] returned empty embedding.`);
+            return null;
         }
-    }
 
-    // Fallback: Generate deterministic 768-dim normalized feature vector
-    const dim = TARGET_DIM;
-    const vector = new Array(dim).fill(0);
-    const cleaned = text.toLowerCase().replace(/[^a-z0-9\s]/g, "");
+        if (values.length > TARGET_DIM) {
+            values = values.slice(0, TARGET_DIM);
+        }
 
-    for (let i = 0; i < cleaned.length; i++) {
-        const charCode = cleaned.charCodeAt(i);
-        const idx1 = (charCode * 31 + i * 17) % dim;
-        const idx2 = (charCode * 53 + i * 29) % dim;
-        vector[idx1] += 1.0;
-        vector[idx2] += 0.5;
-    }
+        // Unit L2 normalization
+        let norm = 0;
+        for (let i = 0; i < values.length; i++) norm += values[i] * values[i];
+        norm = Math.sqrt(norm);
+        if (norm > 0) {
+            for (let i = 0; i < values.length; i++) values[i] /= norm;
+        }
 
-    // Normalize vector (Unit L2 norm-euclidean distance) for Cosine Similarity
-    let norm = 0;
-    for (let i = 0; i < dim; i++) norm += vector[i] * vector[i];
-    norm = Math.sqrt(norm);
-    if (norm > 0) {
-        for (let i = 0; i < dim; i++) vector[i] /= norm;
+        return {
+            values,
+            model: modelName,
+        };
+    } catch (error) {
+        console.error(`[Gemini Embedding] Model [${modelName}] failed:`, error.message);
+        return null;
     }
-
-    return {
-        values: vector,
-        source: "fallback",
-    };
-};
-
-/**
- * Computes Cosine Similarity between two numerical vectors.
- * Returns a value between -1.0 and 1.0 (higher = more similar).
- */
-export const calculateCosineSimilarity = (vecA, vecB) => {
-    if (!vecA || !vecB || vecA.length === 0 || vecB.length === 0 || vecA.length !== vecB.length) {
-        return 0;
-    }
-    let dotProduct = 0;
-    let normA = 0;
-    let normB = 0;
-    for (let i = 0; i < vecA.length; i++) {
-        dotProduct += vecA[i] * vecB[i];
-        normA += vecA[i] * vecA[i];
-        normB += vecB[i] * vecB[i];
-    }
-    if (normA === 0 || normB === 0) return 0;
-    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 };

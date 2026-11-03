@@ -5,17 +5,21 @@ import { useEffect } from "react";
 const useGetAllPost = () => {
     const { setPosts } = useApp();
     useEffect(() => {
+        let isCurrent = true;
         const fetchAllPost = async () => {
             try {
-                const res = await api.get('/api/v1/post/all', { withCredentials: true });
-                if (res.data.success) { 
+                const res = await api.get('/api/v1/post/all');
+                if (isCurrent && res.data?.success) { 
                     setPosts(res.data.posts);
                 }
             } catch (error) {
-                console.log(error);
+                if (isCurrent) console.log(error);
             }
         };
         fetchAllPost();
+        return () => {
+            isCurrent = false;
+        };
     }, []);
 };
 export default useGetAllPost;

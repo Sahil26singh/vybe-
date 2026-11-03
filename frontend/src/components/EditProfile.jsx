@@ -47,12 +47,7 @@ const EditProfile = () => {
         }
         try {
             setLoading(true);
-            const res = await api.post('/api/v1/user/edit/profile', formData,{
-                headers:{
-                    'Content-Type':'multipart/form-data'
-                },
-                withCredentials:true
-            });
+            const res = await api.post('/api/v1/user/edit/profile', formData);
             if(res.data.success){
                 const updatedUserData = {
                     ...user,

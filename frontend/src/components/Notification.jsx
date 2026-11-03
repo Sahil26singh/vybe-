@@ -1,56 +1,76 @@
 import React, { useEffect, useMemo, useState } from "react";
-import api, { API_URL } from "@/lib/axios";
+import api from "@/lib/axios";
 import { useApp } from "@/context/AppContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { Trash2 } from "lucide-react";
-
-const API_BASE = API_URL;
+import { toast } from "sonner";
 
 export default function Notification() {
   const { user, fetchUnreadNotifCount } = useApp();
   const [loading, setLoading] = useState(true);
   const [notifications, setNotifications] = useState([]);
-  const [error, setError] = useState(null);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
 
-  const fetchNotifications = async () => {
-    setLoading(true);
-    setError(null);
+  const fetchNotifications = async (targetPage = 1) => {
+    if (targetPage === 1) setLoading(true);
+    else setLoadingMore(true);
     try {
-      const res = await api.get(`${API_BASE}/api/v1/notification`, { withCredentials: true });
+      const res = await api.get(`/api/v1/notification?page=${targetPage}&limit=20`);
       const list = Array.isArray(res.data?.data) ? res.data.data : [];
-      setNotifications(list);
+      if (targetPage === 1) {
+        setNotifications(list);
+      } else {
+        setNotifications((prev) => {
+          const existingIds = new Set(prev.map((n) => String(n._id)));
+          const uniqueNew = list.filter((n) => !existingIds.has(String(n._id)));
+          return [...prev, ...uniqueNew];
+        });
+      }
+      setPage(targetPage);
+      setHasMore(Boolean(res.data?.hasMore));
       fetchUnreadNotifCount();
     } catch (err) {
       console.error("fetchNotifications error:", err);
-      setError(err?.response?.data?.message || err?.message || "Failed to fetch notifications");
+      const msg = err?.response?.data?.message || err?.message || "Failed to fetch notifications";
+      toast.error(msg);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
+    }
+  };
+
+  const loadMore = () => {
+    if (!loadingMore && hasMore) {
+      fetchNotifications(page + 1);
     }
   };
 
   async function markRead(id) {
     try {
-      await api.put(`${API_BASE}/api/v1/notification/${id}/read`, {}, { withCredentials: true });
+      await api.put(`/api/v1/notification/${id}/read`, {});
       setNotifications((prev) => prev.map((n) => (String(n._id) === String(id) ? { ...n, read: true } : n)));
       fetchUnreadNotifCount();
     } catch (err) {
       console.error("markRead error:", err);
-      setError("Failed to mark notification read");
+      toast.error("Failed to mark notification read");
     }
   }
 
   async function markAllRead() {
     try {
-      await api.put(`${API_BASE}/api/v1/notification/markall`, {}, { withCredentials: true });
+      await api.put('/api/v1/notification/markall', {});
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
       fetchUnreadNotifCount();
+      toast.success("All notifications marked as read");
     } catch (err) {
       console.error("markAllRead error:", err);
-      setError("Failed to mark all read");
+      toast.error("Failed to mark all read");
     }
   }
 
@@ -58,11 +78,13 @@ export default function Notification() {
     setNotifications((prev) => prev.filter((n) => String(n._id) !== String(id)));
     try {
       if (id && String(id).length === 24) {
-        await api.delete(`${API_BASE}/api/v1/notification/${id}`, { withCredentials: true });
+        await api.delete(`/api/v1/notification/${id}`);
         fetchUnreadNotifCount();
+        toast.success("Notification deleted");
       }
     } catch (err) {
       console.error("deleteNotification error:", err);
+      toast.error("Failed to delete notification");
     }
   }
 
@@ -135,6 +157,14 @@ export default function Notification() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {hasMore && (
+        <div className="flex justify-center pt-3">
+          <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? "Loading..." : "Load more"}
+          </Button>
         </div>
       )}
 

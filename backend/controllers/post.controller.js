@@ -3,10 +3,10 @@ import cloudinary from "../utils/cloudinary.js";
 import { Post } from "../models/post.model.js";
 import { User } from "../models/user.model.js";
 import { Comment } from "../models/comment.model.js";
-import { getReceiverSocketId, io } from "../socket/socket.js";
+import { io } from "../socket/socket.js";
 import { Notification } from "../models/notification.model.js";
 import { generateAltText, generateAICaption, moderateContent } from "../utils/gemini.js";
-import { updateUserEmbedding } from "./user.controller.js";
+import { queueEmbedding } from "../services/embedding.service.js";
 
 // DELETE a comment 
 export const deleteComment = async (req, res) => {
@@ -68,17 +68,21 @@ export const addNewPost = async (req, res) => {
             .toFormat('jpeg', { quality: 80 })
             .toBuffer();
 
-        // AI moderation — reject before we ever upload to Cloudinary or hit the DB.
-        const moderation = await moderateContent(optimizedImageBuffer, caption);
+        // Run AI moderation and alt-text suggestion together in parallel with Promise.all
+        const [moderation, altText] = await Promise.all([
+            moderateContent(optimizedImageBuffer, caption),
+            generateAltText(optimizedImageBuffer).catch((err) => {
+                console.error("generateAltText error:", err);
+                return "";
+            })
+        ]);
+
         if (!moderation.safe) {
             return res.status(400).json({
                 success: false,
                 message: moderation.reason || "This post violates our content policy.",
             });
         }
-
-        // Best-effort alt-text suggestion for accessibility. Never blocks posting.
-        const altText = await generateAltText(optimizedImageBuffer);
 
         // buffer to data uri
         const fileUri = `data:image/jpeg;base64,${optimizedImageBuffer.toString('base64')}`;
@@ -93,11 +97,11 @@ export const addNewPost = async (req, res) => {
         if (user) {
             user.posts.push(post._id);
             await user.save();
-            // Update author's profile embedding in background with new post caption
-            updateUserEmbedding(authorId).catch(err => console.error("addNewPost embedding update error:", err));
+            // Queue author profile embedding update in background with new post caption
+            queueEmbedding(authorId);
         }
 
-        await post.populate({ path: 'author', select: '-password' });
+        await post.populate({ path: 'author', select: '-password -embedding -embeddingModel -embeddingStatus -embeddingAttempts' });
 
         return res.status(201).json({
             message: 'New post added',
@@ -113,19 +117,27 @@ export const addNewPost = async (req, res) => {
 
 export const getAllPost = async (req, res) => {
     try {
-        const posts = await Post.find().sort({ createdAt: -1 })
-            .populate({ path: 'author', select: 'username profilePicture' })
-            .populate({
-                path: 'comments',
-                options: { sort: { createdAt: -1 } },
-                populate: {
-                    path: 'author',
-                    select: 'username profilePicture'
-                }
-            });
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+        const skip = (page - 1) * limit;
+
+        const [posts, totalPosts] = await Promise.all([
+            Post.find()
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .populate({ path: 'author', select: 'username profilePicture' }),
+            Post.countDocuments()
+        ]);
+
         return res.status(200).json({
+            success: true,
             posts,
-            success: true
+            page,
+            limit,
+            totalPosts,
+            totalPages: Math.ceil(totalPosts / limit),
+            hasMore: skip + posts.length < totalPosts
         });
     } catch (error) {
         console.log(error);
@@ -136,18 +148,12 @@ export const getAllPost = async (req, res) => {
 export const getUserPost = async (req, res) => {
     try {
         const authorId = req.id;
-        const posts = await Post.find({ author: authorId }).sort({ createdAt: -1 })
-        .populate({
-            path: 'author',
-            select: 'username profilePicture'
-        }).populate({
-            path: 'comments',
-            options: { sort: { createdAt: -1 } },
-            populate: {
+        const posts = await Post.find({ author: authorId })
+            .sort({ createdAt: -1 })
+            .populate({
                 path: 'author',
                 select: 'username profilePicture'
-            }
-        });
+            });
         return res.status(200).json({
             posts,
             success: true
@@ -165,37 +171,38 @@ export const likePost = async (req, res) => {
     const post = await Post.findById(postId);
     if (!post) return res.status(404).json({ message: "Post not found", success: false });
 
-    // addToSet ensures no duplicates
-    await Post.findByIdAndUpdate(postId, { $addToSet: { likes: likeKrneWalaUserKiId } });
+    // Only update if not already liked
+    const updateResult = await Post.updateOne(
+      { _id: postId, likes: { $ne: likeKrneWalaUserKiId } },
+      { $addToSet: { likes: likeKrneWalaUserKiId } }
+    );
 
-    // fetch liker details for the notification payload
-    const user = await User.findById(likeKrneWalaUserKiId).select("username profilePicture");
+    // Only notify if the update actually added a new like
+    if (updateResult.modifiedCount > 0) {
+      const postOwnerId = String(post.author?._id || post.author);
+      // only notify if liker is not the post owner
+      if (postOwnerId !== String(likeKrneWalaUserKiId)) {
+        const user = await User.findById(likeKrneWalaUserKiId).select("username profilePicture");
+        const notif = await Notification.create({
+          to: postOwnerId,
+          from: likeKrneWalaUserKiId,
+          type: "like",
+          data: { postId: post._id, likerId: likeKrneWalaUserKiId, likerUsername: user?.username || "" }
+        });
 
-    const postOwnerId = String(post.author);
-    // only notify if liker is not the post owner
-    if (postOwnerId !== String(likeKrneWalaUserKiId)) {
-      // persist notification in DB
-      const notif = await Notification.create({
-        to: postOwnerId,
-        from: likeKrneWalaUserKiId,
-        type: "like",
-        data: { postId: post._id, likerId: likeKrneWalaUserKiId, likerUsername: user?.username || "" }
-      });
-
-      // Try to send realtime notification if receiver online
-      try {
-        const socketId = getReceiverSocketId(postOwnerId);
-        if (socketId && io) {
-          io.to(socketId).emit("newNotification", {
-            _id: notif._id,
-            from: { _id: likeKrneWalaUserKiId, username: user?.username || "" },
-            type: notif.type,
-            data: notif.data,
-            createdAt: notif.createdAt
-          });
+        try {
+          if (io) {
+            io.to(String(postOwnerId)).emit("newNotification", {
+              _id: notif._id,
+              from: { _id: likeKrneWalaUserKiId, username: user?.username || "" },
+              type: notif.type,
+              data: notif.data,
+              createdAt: notif.createdAt
+            });
+          }
+        } catch (emitErr) {
+          console.error("emit newNotification (like) error:", emitErr);
         }
-      } catch (emitErr) {
-        console.error("emit newNotification (like) error:", emitErr);
       }
     }
 
@@ -219,9 +226,8 @@ export const dislikePost = async (req, res) => {
     try {
       const postOwnerId = String(post.author);
       if (postOwnerId !== String(userId)) {
-        const socketId = getReceiverSocketId(postOwnerId);
-        if (socketId && io) {
-          io.to(socketId).emit("postLikeRemoved", { postId, userId });
+        if (io) {
+          io.to(postOwnerId).emit("postLikeRemoved", { postId, userId });
         }
       }
     } catch (emitErr) {
@@ -260,7 +266,7 @@ export const addComment = async (req,res) =>{
         post.comments.push(comment._id);
         await post.save();
 
-        const postOwnerId = String(post.author);
+        const postOwnerId = String(post.author?._id || post.author);
         if (postOwnerId !== String(commentKrneWalaUserKiId)) {
             const user = await User.findById(commentKrneWalaUserKiId).select("username profilePicture");
             const notif = await Notification.create({
@@ -271,9 +277,8 @@ export const addComment = async (req,res) =>{
             });
 
             try {
-                const socketId = getReceiverSocketId(postOwnerId);
-                if (socketId && io) {
-                    io.to(socketId).emit("newNotification", {
+                if (io) {
+                    io.to(String(postOwnerId)).emit("newNotification", {
                         _id: notif._id,
                         from: { _id: commentKrneWalaUserKiId, username: user?.username || "" },
                         type: notif.type,
@@ -304,9 +309,7 @@ export const getCommentsOfPost = async (req,res) => {
 
         const comments = await Comment.find({post:postId}).sort({ createdAt: -1 }).populate('author', 'username profilePicture');
 
-        if(!comments) return res.status(404).json({message:'No comments found for this post', success:false});
-
-        return res.status(200).json({success:true,comments});
+        return res.status(200).json({ success: true, comments: comments || [] });
 
     } catch (error) {
         console.log(error);
@@ -325,16 +328,39 @@ export const deletePost = async (req,res) => {
         // check if the logged-in user is the owner of the post
         if(post.author.toString() !== authorId) return res.status(403).json({message:'Unauthorized'});
 
-        // delete post
-        await Post.findByIdAndDelete(postId);
+        // 1. Delete the image from Cloudinary
+        if (post.image) {
+            try {
+                const parts = post.image.split('/');
+                const uploadIndex = parts.indexOf('upload');
+                if (uploadIndex !== -1) {
+                    const pathParts = parts.slice(uploadIndex + 1);
+                    if (pathParts[0]?.startsWith('v') && /^\d+$/.test(pathParts[0].slice(1))) {
+                        pathParts.shift();
+                    }
+                    const publicId = pathParts.join('/').replace(/\.[^/.]+$/, '');
+                    if (publicId) await cloudinary.uploader.destroy(publicId);
+                } else {
+                    const filename = parts[parts.length - 1];
+                    const publicId = filename.split('.')[0];
+                    if (publicId) await cloudinary.uploader.destroy(publicId);
+                }
+            } catch (cloudErr) {
+                console.error("Cloudinary delete image error:", cloudErr);
+            }
+        }
 
-        // remove the post id from the user's post
-        let user = await User.findById(authorId);
-        user.posts = user.posts.filter(id => id.toString() !== postId);
-        await user.save();
+        // 2. Clean up bookmarks that point to this post across all users
+        await User.updateMany({ bookmarks: postId }, { $pull: { bookmarks: postId } });
 
-        // delete associated comments
+        // 3. Remove the post id from the author's posts
+        await User.updateOne({ _id: authorId }, { $pull: { posts: postId } });
+
+        // 4. Delete associated comments
         await Comment.deleteMany({post:postId});
+
+        // 5. Delete post
+        await Post.findByIdAndDelete(postId);
 
         return res.status(200).json({
             success:true,
@@ -347,25 +373,39 @@ export const deletePost = async (req,res) => {
     }
 };
 
-export const bookmarkPost = async (req,res) => {
+export const bookmarkPost = async (req, res) => {
     try {
         const postId = req.params.id;
         const authorId = req.id;
         const post = await Post.findById(postId);
-        if(!post) return res.status(404).json({message:'Post not found', success:false});
-        
+        if (!post) return res.status(404).json({ message: 'Post not found', success: false });
+
         const user = await User.findById(authorId);
-        if(user.bookmarks.includes(post._id)){
+        if (!user) return res.status(404).json({ message: 'User not found', success: false });
+
+        const isAlreadyBookmarked = (user.bookmarks || []).some(id => String(id) === String(postId));
+
+        if (isAlreadyBookmarked) {
             // already bookmarked -> remove from the bookmark
-            await user.updateOne({$pull:{bookmarks:post._id}});
-            return res.status(200).json({type:'unsaved', message:'Post removed from bookmark', success:true});
-
-        }else{
-            // bookmark krna pdega
-            await user.updateOne({$addToSet:{bookmarks:post._id}});
-            return res.status(200).json({type:'saved', message:'Post bookmarked', success:true});
+            await User.updateOne({ _id: authorId }, { $pull: { bookmarks: postId } });
+            const updatedUser = await User.findById(authorId).select("-password -embedding -embeddingSource");
+            return res.status(200).json({
+                type: 'unsaved',
+                message: 'Post removed from bookmark',
+                success: true,
+                user: updatedUser
+            });
+        } else {
+            // add to bookmarks
+            await User.updateOne({ _id: authorId }, { $addToSet: { bookmarks: postId } });
+            const updatedUser = await User.findById(authorId).select("-password -embedding -embeddingSource");
+            return res.status(200).json({
+                type: 'saved',
+                message: 'Post bookmarked',
+                success: true,
+                user: updatedUser
+            });
         }
-
     } catch (error) {
         console.log(error);
         return res.status(500).json({ success: false, message: "Internal server error" });

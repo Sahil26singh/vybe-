@@ -11,20 +11,43 @@ import messageRoute from "./routes/message.route.js";
 import { app, server } from "./socket/socket.js";
 import notificationRoute from './routes/notification.route.js';
 import path from "path";
+import { allowedOrigins } from "./config/allowedOrigins.js";
 
 const PORT = process.env.PORT || 8000;
 
 const __dirname = path.resolve();
 
-app.use(helmet({ crossOriginResourcePolicy: false }));
+app.set("trust proxy", 1);
+
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "blob:", "https://res.cloudinary.com", "https:"],
+        connectSrc: [
+          "'self'",
+          "ws:",
+          "wss:",
+          "http:",
+          "https:",
+          "https://res.cloudinary.com",
+          "https://vybe-ymdg.onrender.com",
+          "wss://vybe-ymdg.onrender.com",
+        ],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https:"],
+        fontSrc: ["'self'", "https:", "data:"],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: null,
+      },
+    },
+  })
+);
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
-
-const DEFAULT_ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8000,https://vybe-ymdg.onrender.com";
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS)
-  .split(",")
-  .map((o) => o.trim());
 
 const corsOptions = {
   origin: allowedOrigins,

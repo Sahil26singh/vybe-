@@ -6,7 +6,7 @@ import { Button } from './ui/button';
 import { readFileAsDataURL } from '@/lib/utils';
 import { Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
-import api, { API_URL } from "@/lib/axios";
+import api from "@/lib/axios";
 import { useApp } from '@/context/AppContext';
 
 const CreatePost = ({ open, setOpen }) => {
@@ -36,10 +36,7 @@ const CreatePost = ({ open, setOpen }) => {
     formData.append("image", file);
     try {
       setGeneratingCaption(true);
-      const res = await api.post(`${API_URL}/api/v1/post/generate-caption`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        withCredentials: true
-      });
+      const res = await api.post('/api/v1/post/generate-caption', formData);
       if (res.data?.success && res.data.caption) {
         setCaption(res.data.caption);
         toast.success("AI Caption generated!");
@@ -58,12 +55,7 @@ const CreatePost = ({ open, setOpen }) => {
     if (imagePreview) formData.append("image", file);
     try {
       setLoading(true);
-      const res = await api.post(`${API_URL}/api/v1/post/addpost`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        },
-        withCredentials: true
-      });
+      const res = await api.post('/api/v1/post/addpost', formData);
       if (res.data.success) {
         setPosts([res.data.post, ...posts]);
         toast.success(res.data.message);

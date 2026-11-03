@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
 import api from "@/lib/axios";
 import Post from './Post';
+import { toast } from 'sonner';
 
 const idStr = (x) => (typeof x === 'string' ? x : String(x?.toString?.() ?? x));
 
@@ -9,21 +10,24 @@ export default function Likes() {
   const { user, posts, setPosts } = useApp();
 
   useEffect(() => {
+    let isCurrent = true;
     const fetchIfNeeded = async () => {
       if (!posts || posts.length === 0) {
         try {
-          const res = await api.get('/api/v1/post/all', {
-            withCredentials: true,
-          });
-          if (res.data?.posts) {
+          const res = await api.get('/api/v1/post/all');
+          if (isCurrent && res.data?.posts) {
             setPosts(res.data.posts);
           }
         } catch (err) {
           console.error(err);
+          if (isCurrent) toast.error("Failed to load liked posts");
         }
       }
     };
     fetchIfNeeded();
+    return () => {
+      isCurrent = false;
+    };
   }, [posts?.length]);
 
   const likedPosts = useMemo(() => {

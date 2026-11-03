@@ -6,11 +6,8 @@ import { MoreHorizontal } from 'lucide-react';
 import { Button } from './ui/button';
 import { useApp } from '@/context/AppContext';
 import Comment from './Comment';
-import api, { API_URL } from "@/lib/axios";
+import api from "@/lib/axios";
 import { toast } from 'sonner';
-
-const API_BASE = API_URL;
-const POST_API = `${API_BASE}/api/v1/post`;
 
 const CommentDialog = ({ open, setOpen }) => {
   const navigate = useNavigate();
@@ -19,10 +16,27 @@ const CommentDialog = ({ open, setOpen }) => {
   const [comment, setComment] = useState([]);
 
   useEffect(() => {
-    if (selectedPost) {
-      setComment(selectedPost.comments || []);
+    if (!open || !selectedPost?._id) return;
+    let isCurrent = true;
+
+    if (Array.isArray(selectedPost.comments) && selectedPost.comments[0]?.author?.username) {
+      setComment(selectedPost.comments);
+    } else {
+      setComment([]);
     }
-  }, [selectedPost]);
+
+    api.get(`/api/v1/post/${selectedPost._id}/comment/all`)
+      .then((res) => {
+        if (isCurrent && res.data?.success && Array.isArray(res.data.comments)) {
+          setComment(res.data.comments);
+        }
+      })
+      .catch((err) => console.error("Error fetching comments:", err));
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [open, selectedPost?._id, selectedPost?.comments]);
 
   const changeEventHandler = (e) => {
     const inputText = e.target.value;
@@ -33,12 +47,8 @@ const CommentDialog = ({ open, setOpen }) => {
     if (!text.trim()) return;
     try {
       const res = await api.post(
-        `${POST_API}/${selectedPost?._id}/comment`,
-        { text },
-        {
-          headers: { 'Content-Type': 'application/json' },
-          withCredentials: true,
-        }
+        `/api/v1/post/${selectedPost?._id}/comment`,
+        { text }
       );
 
       if (res.data.success) {
@@ -71,9 +81,7 @@ const CommentDialog = ({ open, setOpen }) => {
     );
 
     try {
-      const res = await api.delete(`${POST_API}/${selectedPost?._id}/comment/${commentId}`, {
-        withCredentials: true,
-      });
+      const res = await api.delete(`/api/v1/post/${selectedPost?._id}/comment/${commentId}`);
       if (res.data?.success) {
         toast.success(res.data.message || 'Comment deleted');
       } else {

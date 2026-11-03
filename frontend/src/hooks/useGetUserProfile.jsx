@@ -1,22 +1,26 @@
 import { useApp } from "@/context/AppContext";
-import api, { API_URL } from "@/lib/axios";
+import api from "@/lib/axios";
 import { useEffect } from "react";
 
 const useGetUserProfile = (userId) => {
     const { setUserProfile } = useApp();
     useEffect(() => {
+        let isCurrent = true;
         const fetchUserProfile = async () => {
             if (!userId) return;
             try {
-                const res = await api.get(`${API_URL}/api/v1/user/${userId}/profile`, { withCredentials: true });
-                if (res.data.success) { 
+                const res = await api.get(`/api/v1/user/${userId}/profile`);
+                if (isCurrent && res.data?.success) { 
                     setUserProfile(res.data.user);
                 }
             } catch (error) {
-                console.log(error);
+                if (isCurrent) console.log(error);
             }
         };
         fetchUserProfile();
+        return () => {
+            isCurrent = false;
+        };
     }, [userId]);
 };
 export default useGetUserProfile;

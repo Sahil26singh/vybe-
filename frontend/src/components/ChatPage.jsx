@@ -4,9 +4,10 @@ import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { MessageCircleCode } from "lucide-react";
 import Messages from "./Messages";
-import api, { API_URL } from "@/lib/axios";
+import api from "@/lib/axios";
 import { useParams, useNavigate } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
+import { toast } from "sonner";
 
 const ChatPage = () => {
   const [textMessage, setTextMessage] = useState("");
@@ -25,8 +26,8 @@ const ChatPage = () => {
       setLoadingConnections(true);
       try {
         const [fRes, gRes] = await Promise.all([
-          api.get(`/api/v1/user/${user._id}/followers`, { withCredentials: true }),
-          api.get(`/api/v1/user/${user._id}/following`, { withCredentials: true }),
+          api.get(`/api/v1/user/${user._id}/followers`),
+          api.get(`/api/v1/user/${user._id}/following`),
         ]);
 
         const followers = Array.isArray(fRes.data?.users) ? fRes.data.users : [];
@@ -56,11 +57,10 @@ const ChatPage = () => {
     setSending(true);
     try {
       const res = await api.post(
-        `${API_URL}/api/v1/message/send/${receiverId}`,
+        `/api/v1/message/send/${receiverId}`,
         { textMessage },
         {
-          headers: { "Content-Type": "application/json" },
-          withCredentials: true,
+          headers: { "Content-Type": "application/json" }
         }
       );
       if (res.data.success) {
@@ -73,6 +73,7 @@ const ChatPage = () => {
       }
     } catch (error) {
       console.log(error);
+      toast.error(error.response?.data?.message || "Failed to send message");
     } finally {
       setSending(false);
     }
@@ -101,9 +102,7 @@ const ChatPage = () => {
     setSelectedUser({ _id: wantId });
 
     api
-      .get(`${API_URL}/api/v1/user/${wantId}/profile`, {
-        withCredentials: true,
-      })
+      .get(`/api/v1/user/${wantId}/profile`)
       .then((res) => {
         const p = res?.data?.user;
         if (!p) throw new Error("not-found");

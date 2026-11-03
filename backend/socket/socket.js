@@ -2,15 +2,11 @@ import { Server } from "socket.io";
 import express from "express";
 import http from "http";
 import jwt from "jsonwebtoken";
+import { allowedOrigins } from "../config/allowedOrigins.js";
 
 const app = express();
 
 const server = http.createServer(app);
-
-const DEFAULT_ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:5174,http://localhost:3000,http://localhost:8000,https://vybe-ymdg.onrender.com";
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || DEFAULT_ALLOWED_ORIGINS)
-    .split(",")
-    .map(o => o.trim());
 
 const io = new Server(server, {
     cors: {
@@ -27,11 +23,11 @@ const io = new Server(server, {
 io.use((socket, next) => {
     try {
         const raw = socket.handshake.headers.cookie || "";
-        const token = raw
+        const tokenCookie = raw
             .split(";")
             .map(c => c.trim())
-            .find(c => c.startsWith("token="))
-            ?.split("=")[1];
+            .find(c => c.startsWith("token="));
+        const token = tokenCookie ? tokenCookie.slice(6) : null;
         if (!token) {
             return next(new Error("Unauthorized"));
         }
@@ -39,32 +35,71 @@ io.use((socket, next) => {
         if (!userId) {
             return next(new Error("Unauthorized"));
         }
-        socket.userId = userId;   // use this instead of the query userId
+        socket.userId = String(userId);   // normalized userId string
         next();
     } catch {
         next(new Error("Unauthorized"));
     }
 });
 
-const userSocketMap = {}; //userId -> socketId
+// Map<userId, Set<socketId>>: tracks active sockets per user for multi-tab presence
+const userSocketMap = new Map();
 
-export const getReceiverSocketId = (receiverId) => userSocketMap[receiverId];
+// Helper to check if a user has any active sockets
+export const isUserOnline = (userId) => userSocketMap.has(String(userId));
 
-io.on('connection', async (socket) => {
-    const userId = socket.userId;
-    if (userId) {
-        userSocketMap[userId] = socket.id;
-        console.log(`User connected: ${userId} -> ${socket.id}`);
+// Helper returning active user room ID or null (backward compatible)
+export const getReceiverSocketId = (receiverId) => {
+    const id = String(receiverId);
+    return userSocketMap.has(id) ? id : null;
+};
+
+// Helper returning array of currently online user IDs
+export const getOnlineUsers = () => Array.from(userSocketMap.keys());
+
+io.on('connection', (socket) => {
+    const userId = socket.userId ? String(socket.userId) : null;
+    if (!userId) return;
+
+    // Join room for this user so io.to(userId) reaches all open tabs/devices
+    socket.join(userId);
+
+    let userSockets = userSocketMap.get(userId);
+    const isFirstConnection = !userSockets || userSockets.size === 0;
+
+    if (!userSockets) {
+        userSockets = new Set();
+        userSocketMap.set(userId, userSockets);
+    }
+    userSockets.add(socket.id);
+    console.log(`User connected: ${userId} (socket ${socket.id}, active tabs: ${userSockets.size})`);
+
+    // 1. Send the initial online users list ONLY to this newly connected socket (no global broadcast)
+    socket.emit('getOnlineUsers', Array.from(userSocketMap.keys()));
+
+    // 2. Broadcast lightweight delta ONLY when user actually transitions from offline to online (0 -> 1 tabs)
+    if (isFirstConnection) {
+        socket.broadcast.emit('userOnline', userId);
     }
 
-    io.emit('getOnlineUsers', Object.keys(userSocketMap));
+    // Allow on-demand request for online users
+    socket.on('getOnlineUsers', () => {
+        socket.emit('getOnlineUsers', Array.from(userSocketMap.keys()));
+    });
 
     socket.on('disconnect', () => {
-        if (userId) {
-            delete userSocketMap[userId];
-            console.log(`User disconnected: ${userId}`);
+        const sockets = userSocketMap.get(userId);
+        if (sockets) {
+            sockets.delete(socket.id);
+            console.log(`User socket disconnected: ${userId} (socket ${socket.id}, remaining tabs: ${sockets.size})`);
+
+            if (sockets.size === 0) {
+                userSocketMap.delete(userId);
+                console.log(`User went offline: ${userId}`);
+                // Broadcast lightweight delta ONLY when user truly goes offline (last tab closed)
+                io.emit('userOffline', userId);
+            }
         }
-        io.emit('getOnlineUsers', Object.keys(userSocketMap));
     });
 });
 

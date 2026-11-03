@@ -4,7 +4,7 @@ import useGetUserProfile from "@/hooks/useGetUserProfile";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import api, { API_URL } from "@/lib/axios";
+import api from "@/lib/axios";
 import { useApp } from "@/context/AppContext";
 import { toast } from "sonner";
 import { AtSign, Heart, MessageCircle } from "lucide-react";
@@ -65,9 +65,8 @@ const Profile = () => {
 
     try {
       const res = await api.post(
-        `${API_URL}/api/v1/user/followorunfollow/${targetId}`,
-        {},
-        { withCredentials: true }
+        `/api/v1/user/followorunfollow/${targetId}`,
+        {}
       );
 
       if (!res.data?.success) {

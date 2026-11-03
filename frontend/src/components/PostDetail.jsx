@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import api, { API_URL } from "@/lib/axios";
+import api from "@/lib/axios";
 import { useApp } from "@/context/AppContext";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { FaHeart, FaRegHeart } from "react-icons/fa";
@@ -20,7 +20,7 @@ const hasId = (list, id) =>
 export default function PostDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user, posts, setPosts } = useApp();
+  const { user, setAuthUser, posts, setPosts } = useApp();
 
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -29,9 +29,7 @@ export default function PostDetail() {
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
 
-  const isBookmarked = user?.bookmarks
-    ? user.bookmarks.map(idStr).includes(idStr(post?._id))
-    : false;
+  const isBookmarked = (user?.bookmarks || []).map(idStr).includes(idStr(post?._id));
 
   // Load from global posts cache first, then fetch if not found
   useEffect(() => {
@@ -43,8 +41,10 @@ export default function PostDetail() {
       setLikeCount(Array.isArray(cached.likes) ? cached.likes.length : 0);
       setLoading(false);
     } else {
-      api.get(`${API_URL}/api/v1/post/all`, { withCredentials: true })
+      let isCurrent = true;
+      api.get('/api/v1/post/all')
         .then((res) => {
+          if (!isCurrent) return;
           const all = Array.isArray(res.data?.posts) ? res.data.posts : [];
           const found = all.find((p) => idStr(p._id) === idStr(id));
           if (found) {
@@ -55,8 +55,30 @@ export default function PostDetail() {
           }
         })
         .catch(console.error)
-        .finally(() => setLoading(false));
+        .finally(() => {
+          if (isCurrent) setLoading(false);
+        });
+      return () => {
+        isCurrent = false;
+      };
     }
+  }, [id, posts, user?._id]);
+
+  // Load comments separately
+  useEffect(() => {
+    if (!id) return;
+    let isCurrent = true;
+    api.get(`/api/v1/post/${id}/comment/all`)
+      .then((res) => {
+        if (isCurrent && res.data?.success && Array.isArray(res.data.comments)) {
+          setComments(res.data.comments);
+        }
+      })
+      .catch((err) => console.error("Error loading post comments:", err));
+
+    return () => {
+      isCurrent = false;
+    };
   }, [id]);
 
   const likeHandler = async () => {
@@ -88,7 +110,7 @@ export default function PostDetail() {
 
     try {
       toast.success(newLiked ? "Post liked" : "Post disliked");
-      await api.post(`${API_URL}/api/v1/post/${post._id}/${action}`, {}, { withCredentials: true });
+      await api.post(`/api/v1/post/${post._id}/${action}`, {});
     } catch {
       // Revert on error using captured pre-action values
       setLiked(prevLiked);
@@ -101,17 +123,33 @@ export default function PostDetail() {
     if (!commentText.trim() || !post) return;
     try {
       const res = await api.post(
-        `${API_URL}/api/v1/post/${post._id}/comment`,
-        { text: commentText },
-        { headers: { "Content-Type": "application/json" }, withCredentials: true }
+        `/api/v1/post/${post._id}/comment`,
+        { text: commentText }
       );
       if (res.data.success) {
         setComments((prev) => [...prev, res.data.comment]);
         setCommentText("");
         toast.success("Comment added");
       }
-    } catch (err) {
+    } catch {
       toast.error("Failed to add comment");
+    }
+  };
+
+  const bookmarkHandler = async () => {
+    if (!post?._id) return;
+    try {
+      const res = await api.post(`/api/v1/post/${post._id}/bookmark`, {});
+      if (res.data?.success) {
+        if (res.data.user) {
+          const serverUser = res.data.user;
+          const normalizedBookmarks = (serverUser.bookmarks || []).map(idStr);
+          setAuthUser({ ...serverUser, bookmarks: normalizedBookmarks });
+        }
+        toast.success(res.data.message || (isBookmarked ? "Removed from bookmarks" : "Added to bookmarks"));
+      }
+    } catch {
+      toast.error("Could not update bookmark");
     }
   };
 
@@ -176,14 +214,23 @@ export default function PostDetail() {
         )}
 
         {/* Actions */}
-        <div className="px-4 pt-3 pb-2 flex items-center gap-4">
-          <button onClick={likeHandler} className="transition-transform hover:scale-110">
-            {liked
-              ? <FaHeart className="h-6 w-6 text-red-500" />
-              : <FaRegHeart className="h-6 w-6 text-gray-700" />
-            }
+        <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button onClick={likeHandler} className="transition-transform hover:scale-110">
+              {liked
+                ? <FaHeart className="h-6 w-6 text-red-500" />
+                : <FaRegHeart className="h-6 w-6 text-gray-700" />
+              }
+            </button>
+            <MessageCircle className="h-6 w-6 text-gray-700" />
+          </div>
+          <button onClick={bookmarkHandler} className="transition-transform hover:scale-110">
+            {isBookmarked ? (
+              <BookmarkCheck className="h-6 w-6 text-black fill-black" />
+            ) : (
+              <Bookmark className="h-6 w-6 text-gray-700" />
+            )}
           </button>
-          <MessageCircle className="h-6 w-6 text-gray-700" />
         </div>
 
         {/* Like count */}

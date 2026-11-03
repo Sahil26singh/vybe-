@@ -1,7 +1,7 @@
-import {Conversation} from "../models/conversation.model.js";
-import { getReceiverSocketId, io } from "../socket/socket.js";
-import {Message} from "../models/message.model.js"
-import { Notification } from "../models/notification.model.js";
+import mongoose from "mongoose";
+import { Conversation } from "../models/conversation.model.js";
+import { io } from "../socket/socket.js";
+import { Message } from "../models/message.model.js";
 import { User } from "../models/user.model.js";
 
 export const sendMessage = async (req, res) => {
@@ -25,15 +25,23 @@ export const sendMessage = async (req, res) => {
 
     const trimmedMessage = message.trim();
 
-    // find or create conversation
+    // find or create conversation (upsert prevents duplicate simultaneous conversations)
     let conversation = await Conversation.findOne({
       participants: { $all: [senderId, receiverId] }
     });
 
     if (!conversation) {
-      conversation = await Conversation.create({
-        participants: [senderId, receiverId]
-      });
+      const sortedParticipants = [String(senderId), String(receiverId)].sort();
+      conversation = await Conversation.findOneAndUpdate(
+        { participants: sortedParticipants },
+        {
+          $setOnInsert: {
+            participants: sortedParticipants,
+            messages: []
+          }
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
     }
 
     // create message
@@ -43,38 +51,16 @@ export const sendMessage = async (req, res) => {
       message: trimmedMessage
     });
 
-    // push message id into conversation and save conversation
-    conversation.messages.push(newMessage._id);
-    await conversation.save();
+    // push message id into conversation atomically
+    await Conversation.findByIdAndUpdate(conversation._id, { $push: { messages: newMessage._id } });
 
-    // create notification entry for receiver
-    const notif = await Notification.create({
-      to: receiverId,
-      from: senderId,
-      type: "message",
-      data: { messageId: newMessage._id, conversationId: conversation._id, text: newMessage.message }
-    });
-
-    // emit realtime notification to receiver if their socket is known
+    // emit realtime newMessage to receiver if online (no persistent Notification row saved)
     try {
-      if (typeof getReceiverSocketId === "function" && typeof io !== "undefined" && io) {
-        const receiverSocketId = getReceiverSocketId(receiverId);
-        if (receiverSocketId) {
-          io.to(receiverSocketId).emit("newNotification", {
-            _id: notif._id,
-            from: { _id: senderId },
-            type: notif.type,
-            data: notif.data,
-            createdAt: notif.createdAt
-          });
-
-          // also emit the newMessage realtime
-          io.to(receiverSocketId).emit("newMessage", newMessage);
-        }
+      if (typeof io !== "undefined" && io) {
+        io.to(String(receiverId)).emit("newMessage", newMessage);
       }
     } catch (emitErr) {
-      // don't crash the request if emit fails 
-      console.error("emit newNotification/newMessage error:", emitErr);
+      console.error("emit newMessage error:", emitErr);
     }
 
     return res.status(201).json({ success: true, newMessage });
@@ -84,22 +70,66 @@ export const sendMessage = async (req, res) => {
   }
 };
 
-export const getMessage = async (req,res) => {
-    try {
-        const senderId = req.id;
-        const receiverId = req.params.id;
-        const conversation = await Conversation.findOne({
-            participants:{$all: [senderId, receiverId]}
-        }).populate('messages');
-        if(!conversation) return res.status(200).json({success:true, messages:[]});
+export const getMessage = async (req, res) => {
+  try {
+    const senderId = req.id;
+    const receiverId = req.params.id;
 
-        return res.status(200).json({success:true, messages:conversation?.messages});
-        
-    } catch (error) {
-        console.log(error);
-        return res.status(500).json({ success: false, message: "Failed to load messages" });
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const before = req.query.before;
+
+    const conversation = await Conversation.findOne({
+      participants: { $all: [senderId, receiverId] }
+    });
+    if (!conversation) {
+      return res.status(200).json({ success: true, messages: [], totalMessages: 0, hasMore: false });
     }
-}
+
+    const totalMessages = conversation.messages.length;
+
+    let messageFilter = { _id: { $in: conversation.messages } };
+
+    // Cursor-based pagination support (?before=<lastMessageId>)
+    if (before && mongoose.isValidObjectId(before)) {
+      const cursorMsg = await Message.findById(before).select("createdAt");
+      if (cursorMsg) {
+        messageFilter.createdAt = { $lt: cursorMsg.createdAt };
+      } else {
+        messageFilter._id = { $lt: before };
+      }
+    }
+
+    const query = Message.find(messageFilter)
+      .sort({ createdAt: -1 })
+      .limit(limit);
+
+    // If cursor was not passed, use skip-based offset if page > 1
+    if (!before && page > 1) {
+      const skip = (page - 1) * limit;
+      query.skip(skip);
+    }
+
+    const paginatedMessageDocs = await query;
+    const hasMore = before
+      ? paginatedMessageDocs.length === limit
+      : ((page - 1) * limit) + paginatedMessageDocs.length < totalMessages;
+
+    const chronologicalMessages = paginatedMessageDocs.reverse();
+
+    return res.status(200).json({
+      success: true,
+      messages: chronologicalMessages,
+      page,
+      limit,
+      totalMessages,
+      hasMore
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({ success: false, message: "Failed to load messages" });
+  }
+};
 
 // Edit message (sender only)
 export const editMessage = async (req, res) => {
@@ -120,9 +150,8 @@ export const editMessage = async (req, res) => {
 
     // Emit realtime update to receiver
     try {
-      const receiverSocketId = getReceiverSocketId(String(msg.receiverId));
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit("messageEdited", msg);
+      if (typeof io !== "undefined" && io) {
+        io.to(String(msg.receiverId)).emit("messageEdited", msg);
       }
     } catch (err) {
       console.error("emit messageEdited error:", err);
@@ -142,7 +171,7 @@ export const deleteMessage = async (req, res) => {
     const { id: messageId } = req.params;
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ success: false, message: "Message not found" });
-    if (String(msg.senderId) != String(userId)) {
+    if (String(msg.senderId) !== String(userId)) {
       return res.status(403).json({ success: false, message: "Not allowed to delete this message" });
     }
 
@@ -154,9 +183,8 @@ export const deleteMessage = async (req, res) => {
 
     // Emit realtime deletion to receiver
     try {
-      const receiverSocketId = getReceiverSocketId(receiverId);
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit("messageDeleted", { messageId });
+      if (typeof io !== "undefined" && io) {
+        io.to(String(receiverId)).emit("messageDeleted", { messageId });
       }
     } catch (err) {
       console.error("emit messageDeleted error:", err);
@@ -184,12 +212,22 @@ export const forwardMessage = async (req, res) => {
     });
     if (!original) return res.status(404).json({ success: false, message: "Original message not found" });
 
-    // find or create conversation between sender and toUserId
+    // find or create conversation between sender and toUserId (upsert prevents duplicate simultaneous creations)
     let conversation = await Conversation.findOne({
       participants: { $all: [senderId, toUserId] }
     });
     if (!conversation) {
-      conversation = await Conversation.create({ participants: [senderId, toUserId] });
+      const sortedParticipants = [String(senderId), String(toUserId)].sort();
+      conversation = await Conversation.findOneAndUpdate(
+        { participants: sortedParticipants },
+        {
+          $setOnInsert: {
+            participants: sortedParticipants,
+            messages: []
+          }
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
     }
 
     // Create a new message with same text
@@ -198,13 +236,15 @@ export const forwardMessage = async (req, res) => {
       receiverId: toUserId,
       message: original.message
     });
-    conversation.messages.push(newMsg._id);
-    await conversation.save();
+    await Conversation.findByIdAndUpdate(conversation._id, { $push: { messages: newMsg._id } });
 
     // Realtime emit to receiver if online
-    const receiverSocketId = getReceiverSocketId(toUserId);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("newMessage", newMsg);
+    try {
+      if (typeof io !== "undefined" && io) {
+        io.to(String(toUserId)).emit("newMessage", newMsg);
+      }
+    } catch (err) {
+      console.error("emit forward newMessage error:", err);
     }
 
     return res.status(201).json({ success: true, message: newMsg });

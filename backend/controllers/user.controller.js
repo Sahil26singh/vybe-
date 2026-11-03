@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { User } from "../models/user.model.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -5,28 +6,15 @@ import getDataUri from "../utils/datauri.js";
 import cloudinary from "../utils/cloudinary.js";
 import { Post } from "../models/post.model.js";
 import { Notification } from "../models/notification.model.js";
-import { getReceiverSocketId, io } from "../socket/socket.js";
-import { generateUserEmbedding, calculateCosineSimilarity } from "../utils/gemini.js";
+import { io } from "../socket/socket.js";
+import { queueEmbedding } from "../services/embedding.service.js";
 
-// Helper to update embedding vector for a user based on bio and recent post captions
-export const updateUserEmbedding = async (userId) => {
-  try {
-    const user = await User.findById(userId);
-    if (!user) return;
-    const recentPosts = await Post.find({ author: userId }).sort({ createdAt: -1 }).limit(5).select("caption");
-    const postText = recentPosts.map(p => p.caption).filter(Boolean).join(". ");
-    const profileText = `Username: ${user.username}. Bio: ${user.bio || "No bio"}. Gender: ${user.gender || ""}. Posts: ${postText}`;
-    const result = await generateUserEmbedding(profileText);
-    if (result && result.values && result.values.length > 0) {
-      user.embedding = result.values;
-      user.embeddingSource = result.source;
-      user.embeddingUpdatedAt = new Date();
-      user.markModified("embedding");
-      await user.save();
-      console.log(` [Vector Embedding] Generated (${result.source}) ${result.values.length}-dim vector for user @${user.username}`);
-    }
-  } catch (err) {
-    console.error("updateUserEmbedding error:", err.message);
+// In-memory 5-minute cache for suggested users: userId -> { users, source, expiresAt }
+const suggestionsCache = new Map();
+
+export const invalidateSuggestedUsersCache = (userId) => {
+  if (userId) {
+    suggestionsCache.delete(String(userId));
   }
 };
 
@@ -183,11 +171,12 @@ export const register = async (req, res) => {
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        await User.create({
+        const newUser = await User.create({
             username,
             email,
             password: hashedPassword
         });
+        queueEmbedding(newUser._id);
         return res.status(201).json({
             message: "Account created successfully.",
             success: true,
@@ -262,7 +251,7 @@ export const login = async (req, res) => {
         const isProd = process.env.NODE_ENV === "production";
         return res.cookie('token', token, {
             httpOnly: true,
-            sameSite: isProd ? 'none' : 'lax',
+            sameSite: 'lax',
             secure: isProd,
             maxAge: 1 * 24 * 60 * 60 * 1000
         }).json({
@@ -282,7 +271,7 @@ export const logout = async (_, res) => {
         const isProd = process.env.NODE_ENV === "production";
         return res.cookie("token", "", {
             httpOnly: true,
-            sameSite: isProd ? 'none' : 'lax',
+            sameSite: 'lax',
             secure: isProd,
             maxAge: 0
         }).json({
@@ -291,6 +280,41 @@ export const logout = async (_, res) => {
         });
     } catch (error) {
         console.log(error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+};
+
+export const getMe = async (req, res) => {
+    try {
+        const userId = req.id;
+        const user = await User.findById(userId).select("-password -embedding -embeddingModel -embeddingStatus -embeddingAttempts");
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+        const populatedPosts = await Post.find({
+            _id: { $in: user.posts },
+            author: user._id
+        });
+        const sanitizedUser = {
+            _id: user._id,
+            username: user.username,
+            email: user.email,
+            profilePicture: user.profilePicture,
+            bio: user.bio,
+            gender: user.gender,
+            followers: user.followers,
+            following: user.following,
+            bookmarks: (user.bookmarks || []).map((id) =>
+              typeof id === "string" ? id : String(id)
+            ),
+            posts: populatedPosts
+        };
+        return res.status(200).json({
+            success: true,
+            user: sanitizedUser
+        });
+    } catch (error) {
+        console.error("getMe error:", error);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
@@ -306,9 +330,9 @@ export const getProfile = async (req, res) => {
         });
 
         if (isOwnProfile) {
-            query = query.populate('bookmarks').select('-password -embedding');
+            query = query.populate('bookmarks').select('-password -embedding -embeddingModel -embeddingStatus -embeddingAttempts');
         } else {
-            query = query.select('-password -email -embedding -bookmarks');
+            query = query.select('-password -email -embedding -embeddingModel -embeddingStatus -embeddingAttempts -bookmarks');
         }
 
         const user = await query;
@@ -341,26 +365,28 @@ export const editProfile = async (req, res) => {
             cloudResponse = await cloudinary.uploader.upload(fileUri);
         }
 
-        const user = await User.findById(userId).select('-password');
+        const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({
                 message: 'User not found.',
                 success: false
             });
         }
-        if (bio) user.bio = bio;
-        if (gender) user.gender = gender;
+        if (bio !== undefined) user.bio = bio;
+        if (gender !== undefined) user.gender = gender;
         if (profilePicture) user.profilePicture = cloudResponse.secure_url;
 
         await user.save();
 
-        // Update user embedding vector in background when profile changes
-        updateUserEmbedding(userId).catch(err => console.error("editProfile embedding error:", err));
+        // Queue user embedding vector update in background when profile changes
+        queueEmbedding(userId);
+
+        const updatedUser = await User.findById(userId).select('-password -embedding -embeddingModel -embeddingStatus -embeddingAttempts');
 
         return res.status(200).json({
             message: 'Profile updated.',
             success: true,
-            user
+            user: updatedUser
         });
 
     } catch (error) {
@@ -370,75 +396,202 @@ export const editProfile = async (req, res) => {
 };
 
 export const getSuggestedUsers = async (req, res) => {
+    const startTime = Date.now();
+    const loggedInUserId = String(req.id);
     try {
-        const loggedInUserId = req.id;
-        const loggedInUser = await User.findById(loggedInUserId).select("following embedding embeddingSource bio gender username");
+        const limitParam = Math.min(20, Math.max(1, parseInt(req.query.limit) || 10));
+
+        // 1. Check in-memory 5-minute cache
+        const cached = suggestionsCache.get(loggedInUserId);
+        if (cached && cached.expiresAt > Date.now()) {
+            const durationMs = Date.now() - startTime;
+            console.log(`[SuggestedUsers] userId=${loggedInUserId} source=${cached.source} (cached) durationMs=${durationMs} resultCount=${cached.users.length}`);
+            return res.status(200).json({
+                success: true,
+                users: cached.users.slice(0, limitParam),
+                source: cached.source
+            });
+        }
+
+        const loggedInUser = await User.findById(loggedInUserId)
+            .select("+embedding embeddingModel embeddingStatus following");
 
         if (!loggedInUser) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        // If logged-in user does not have an embedding vector or source yet, generate one
-        if (!loggedInUser.embedding || loggedInUser.embedding.length === 0 || !loggedInUser.embeddingSource) {
-            await updateUserEmbedding(loggedInUserId);
-            const reloaded = await User.findById(loggedInUserId).select("embedding embeddingSource");
-            if (reloaded) {
-                loggedInUser.embedding = reloaded.embedding;
-                loggedInUser.embeddingSource = reloaded.embeddingSource;
+        const followingObjectIds = (loggedInUser.following || [])
+            .map(id => (id?._id ? id._id : id))
+            .filter(Boolean)
+            .map(id => new mongoose.Types.ObjectId(String(id)));
+
+        const myObjectId = new mongoose.Types.ObjectId(loggedInUserId);
+        const excludeObjectIds = [myObjectId, ...followingObjectIds];
+
+        let results = [];
+        let source = "popular";
+
+        // TIER A: Atlas Vector Search
+        const hasReadyVector =
+            loggedInUser.embeddingStatus === "ready" &&
+            Array.isArray(loggedInUser.embedding) &&
+            loggedInUser.embedding.length === 768 &&
+            loggedInUser.embeddingModel;
+
+        if (hasReadyVector) {
+            try {
+                const vectorIndexName = process.env.VECTOR_INDEX_NAME || "user_embedding_index";
+                const vectorMatches = await User.aggregate([
+                    {
+                        $vectorSearch: {
+                            index: vectorIndexName,
+                            path: "embedding",
+                            queryVector: loggedInUser.embedding,
+                            numCandidates: 200,
+                            limit: 60,
+                        }
+                    },
+                    {
+                        $match: {
+                            _id: { $nin: excludeObjectIds },
+                            embeddingModel: loggedInUser.embeddingModel,
+                            embeddingStatus: "ready",
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            username: 1,
+                            profilePicture: 1,
+                            bio: 1,
+                            score: { $meta: "vectorSearchScore" }
+                        }
+                    },
+                    { $limit: limitParam }
+                ]);
+
+                if (vectorMatches && vectorMatches.length > 0) {
+                    results = vectorMatches;
+                    source = "vector";
+                }
+            } catch (vectorErr) {
+                // Vector search not available yet (e.g. index building or fallback)
+                // Gracefully continue to Tier B
             }
         }
 
-        // Exclude self + users already being followed
-        const followingArray = (loggedInUser.following || []).map(id => id?._id ? String(id._id) : String(id));
-        const excludeIds = [String(loggedInUserId), ...followingArray];
+        // TIER B: Friends-of-friends (Mutual connections)
+        if (results.length < limitParam && followingObjectIds.length > 0) {
+            try {
+                const alreadyFoundIds = results.map(u => u._id);
+                const currentExclude = [...excludeObjectIds, ...alreadyFoundIds];
+                const needed = limitParam - results.length;
 
-        // Fetch candidate users not followed yet
-        const candidates = await User.find({ _id: { $nin: excludeIds } })
-            .select("-password -email -bookmarks")
-            .lean();
+                const mutualMatches = await User.aggregate([
+                    { $match: { _id: { $in: followingObjectIds } } },
+                    { $unwind: "$following" },
+                    { $match: { following: { $nin: currentExclude } } },
+                    { $group: { _id: "$following", mutualCount: { $sum: 1 } } },
+                    { $sort: { mutualCount: -1 } },
+                    { $limit: needed },
+                    {
+                        $lookup: {
+                            from: "users",
+                            localField: "_id",
+                            foreignField: "_id",
+                            as: "userDoc"
+                        }
+                    },
+                    { $unwind: "$userDoc" },
+                    {
+                        $project: {
+                            _id: "$userDoc._id",
+                            username: "$userDoc.username",
+                            profilePicture: "$userDoc.profilePicture",
+                            bio: "$userDoc.bio",
+                            mutualCount: 1
+                        }
+                    }
+                ]);
 
-        // Generate missing candidate embeddings in parallel (fast & non-blocking)
-        const missingCandidates = candidates.filter(c => !c.embedding || c.embedding.length === 0 || !c.embeddingSource);
-        if (missingCandidates.length > 0) {
-            await Promise.all(missingCandidates.map(async (cand) => {
-                await updateUserEmbedding(cand._id);
-                const reloaded = await User.findById(cand._id).select("embedding embeddingSource").lean();
-                if (reloaded) {
-                    cand.embedding = reloaded.embedding;
-                    cand.embeddingSource = reloaded.embeddingSource;
+                if (mutualMatches && mutualMatches.length > 0) {
+                    if (results.length === 0) {
+                        source = "mutual";
+                    }
+                    results = results.concat(mutualMatches);
                 }
-            }));
+            } catch (mutualErr) {
+                console.error("[SuggestedUsers] Tier B mutual friends error:", mutualErr.message);
+            }
         }
 
-        // Score candidates using Cosine Similarity only when embeddingSource matches
-        if (loggedInUser.embedding && loggedInUser.embedding.length > 0) {
-            const rankedUsers = candidates.map(user => {
-                let score = 0;
-                const sameSource = Boolean(
-                    loggedInUser.embeddingSource &&
-                    user.embeddingSource &&
-                    loggedInUser.embeddingSource === user.embeddingSource
-                );
-                if (sameSource && user.embedding && user.embedding.length === loggedInUser.embedding.length) {
-                    score = calculateCosineSimilarity(loggedInUser.embedding, user.embedding);
-                }
-                const { embedding, embeddingSource, ...rest } = user;
-                return { ...rest, similarityScore: score };
-            });
+        // TIER C: Popular users (highest follower count)
+        if (results.length < limitParam) {
+            try {
+                const alreadyFoundIds = results.map(u => u._id);
+                const currentExclude = [...excludeObjectIds, ...alreadyFoundIds];
+                const needed = limitParam - results.length;
 
-            // Sort descending by similarityScore, then by newest
-            rankedUsers.sort((a, b) => (b.similarityScore || 0) - (a.similarityScore || 0));
-            console.log(`🔍 [Vector Search] Scored ${rankedUsers.length} candidates using Cosine Similarity (${loggedInUser.embeddingSource || "none"}). Top match: @${rankedUsers[0]?.username} (Score: ${rankedUsers[0]?.similarityScore?.toFixed(4) || 0})`);
-            return res.status(200).json({ success: true, users: rankedUsers });
+                const popularMatches = await User.aggregate([
+                    { $match: { _id: { $nin: currentExclude } } },
+                    {
+                        $addFields: {
+                            followerCount: { $size: { $ifNull: ["$followers", []] } }
+                        }
+                    },
+                    { $sort: { followerCount: -1, createdAt: -1 } },
+                    { $limit: needed },
+                    {
+                        $project: {
+                            _id: 1,
+                            username: 1,
+                            profilePicture: 1,
+                            bio: 1,
+                            followerCount: 1
+                        }
+                    }
+                ]);
+
+                if (popularMatches && popularMatches.length > 0) {
+                    if (results.length === 0) {
+                        source = "popular";
+                    }
+                    results = results.concat(popularMatches);
+                }
+            } catch (popErr) {
+                console.error("[SuggestedUsers] Tier C popular users error:", popErr.message);
+            }
         }
 
-        const sanitizedCandidates = candidates.map(({ embedding, embeddingSource, ...rest }) => rest);
+        // Clean output: NEVER return password, email, bookmarks, embedding, or embedding internal fields
+        const sanitizedUsers = results.slice(0, limitParam).map(u => ({
+            _id: u._id,
+            username: u.username,
+            profilePicture: u.profilePicture || "",
+            bio: u.bio || "",
+            ...(u.score !== undefined ? { score: u.score } : {}),
+            ...(u.mutualCount !== undefined ? { mutualCount: u.mutualCount } : {}),
+            ...(u.followerCount !== undefined ? { followerCount: u.followerCount } : {}),
+        }));
+
+        // Cache result for 5 minutes
+        suggestionsCache.set(loggedInUserId, {
+            users: sanitizedUsers,
+            source,
+            expiresAt: Date.now() + 5 * 60 * 1000
+        });
+
+        const durationMs = Date.now() - startTime;
+        console.log(`[SuggestedUsers] userId=${loggedInUserId} source=${source} durationMs=${durationMs} resultCount=${sanitizedUsers.length}`);
+
         return res.status(200).json({
             success: true,
-            users: sanitizedCandidates
+            users: sanitizedUsers,
+            source
         });
     } catch (error) {
-        console.error("getSuggestedUsers error:", error);
+        const durationMs = Date.now() - startTime;
+        console.error(`[SuggestedUsers] userId=${loggedInUserId} error: ${error.message} durationMs=${durationMs}`);
         return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
@@ -467,12 +620,15 @@ export const followOrUnfollow = async (req, res) => {
         const followingStrings = (user.following || []).map(String);
         const isFollowing = followingStrings.includes(jiskoFollowKrunga);
 
+        // Invalidate suggestions cache for the actor who followed/unfollowed
+        invalidateSuggestedUsersCache(followKrneWala);
+
         if (isFollowing) {
             await Promise.all([
                 User.updateOne({ _id: followKrneWala }, { $pull: { following: jiskoFollowKrunga } }),
                 User.updateOne({ _id: jiskoFollowKrunga }, { $pull: { followers: followKrneWala } }),
             ]);
-            const updatedUser = await User.findById(followKrneWala).select("-password");
+            const updatedUser = await User.findById(followKrneWala).select("-password -embedding -embeddingModel -embeddingStatus -embeddingAttempts");
             return res.status(200).json({ message: 'Unfollowed successfully', success: true, user: updatedUser });
         } else {
             await Promise.all([
@@ -488,17 +644,14 @@ export const followOrUnfollow = async (req, res) => {
                 });
 
                 try {
-                    if (typeof getReceiverSocketId === "function" && typeof io !== "undefined" && io) {
-                        const socketId = getReceiverSocketId(jiskoFollowKrunga);
-                        if (socketId) {
-                            io.to(socketId).emit("newNotification", {
-                                _id: notif._id,
-                                from: { _id: followKrneWala, username: user?.username || "" },
-                                type: notif.type,
-                                data: notif.data,
-                                createdAt: notif.createdAt
-                            });
-                        }
+                    if (typeof io !== "undefined" && io) {
+                        io.to(String(jiskoFollowKrunga)).emit("newNotification", {
+                            _id: notif._id,
+                            from: { _id: followKrneWala, username: user?.username || "" },
+                            type: notif.type,
+                            data: notif.data,
+                            createdAt: notif.createdAt
+                        });
                     }
                 } catch (emitErr) {
                     console.error("emit newNotification error (follow):", emitErr);
@@ -507,7 +660,7 @@ export const followOrUnfollow = async (req, res) => {
                 console.error("Failed to create follow notification:", notifErr);
             }
 
-            const updatedUser = await User.findById(followKrneWala).select("-password");
+            const updatedUser = await User.findById(followKrneWala).select("-password -embedding -embeddingModel -embeddingStatus -embeddingAttempts");
             return res.status(200).json({ message: 'Followed successfully', success: true, user: updatedUser });
         }
     } catch (error) {

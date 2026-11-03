@@ -12,14 +12,12 @@ import {
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { toast } from "sonner";
-import api, { API_URL } from "@/lib/axios";
+import api from "@/lib/axios";
 import { useNavigate, useLocation, matchPath } from "react-router-dom";
 import { useApp } from "@/context/AppContext";
 import CreatePost from "./CreatePost";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import logo from '../assets/logo.png';
-
-const API_BASE = API_URL;
 
 const LeftSidebar = () => {
   const navigate = useNavigate();
@@ -47,9 +45,7 @@ const LeftSidebar = () => {
   // Logout
   const logoutHandler = async () => {
     try {
-      const res = await api.post(`${API_BASE}/api/v1/user/logout`, {}, {
-        withCredentials: true,
-      });
+      const res = await api.post('/api/v1/user/logout', {});
       if (res.data.success) {
         setAuthUser(null);
         setSelectedPost(null);
@@ -149,8 +145,8 @@ const LeftSidebar = () => {
     setConnectionsError(null);
     try {
       const [fRes, gRes] = await Promise.all([
-        api.get(`${API_BASE}/api/v1/user/${userId}/followers`, { withCredentials: true }),
-        api.get(`${API_BASE}/api/v1/user/${userId}/following`, { withCredentials: true }),
+        api.get(`/api/v1/user/${userId}/followers`),
+        api.get(`/api/v1/user/${userId}/following`),
       ]);
       const fList = Array.isArray(fRes.data?.users) ? fRes.data.users : Array.isArray(fRes.data?.data) ? fRes.data.data : [];
       const gList = Array.isArray(gRes.data?.users) ? gRes.data.users : Array.isArray(gRes.data?.data) ? gRes.data.data : [];

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
 import api from "@/lib/axios";
 import Post from './Post';
+import { toast } from 'sonner';
 
 const idStr = (x) => (typeof x === 'string' ? x : String(x?.toString?.() ?? x));
 
@@ -9,18 +10,23 @@ export default function Bookmarks() {
   const { user, posts, setPosts } = useApp();
 
   useEffect(() => {
+    let isCurrent = true;
     if (!posts || posts.length === 0) {
       (async () => {
         try {
-          const res = await api.get('/api/v1/post/all', { withCredentials: true });
-          if (res.data?.success && Array.isArray(res.data.posts)) {
+          const res = await api.get('/api/v1/post/all');
+          if (isCurrent && res.data?.success && Array.isArray(res.data.posts)) {
             setPosts(res.data.posts);
           }
         } catch (e) {
           console.error(e);
+          if (isCurrent) toast.error("Failed to load bookmarked posts");
         }
       })();
     }
+    return () => {
+      isCurrent = false;
+    };
   }, [posts?.length]);
 
   const bookmarkIds = useMemo(() => (user?.bookmarks || []).map(idStr), [user?.bookmarks]);

@@ -28,13 +28,7 @@ const Signup = () => {
       setLoading(true);
       const res = await api.post(
         "/api/v1/user/register",
-        input,
-        {
-          headers: {
-            "Content-Type": "application/json",
-          },
-          withCredentials: true,
-        }
+        input
       );
       if (res.data.success) {
         navigate("/login");

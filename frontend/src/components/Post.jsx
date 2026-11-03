@@ -6,7 +6,7 @@ import { Button } from "./ui/button";
 import { FaHeart, FaRegHeart } from "react-icons/fa";
 import CommentDialog from "./CommentDialog";
 import { useApp } from "@/context/AppContext";
-import api, { API_URL } from "@/lib/axios";
+import api from "@/lib/axios";
 import { toast } from "sonner";
 import { Badge } from "./ui/badge";
 import { useNavigate } from "react-router-dom";
@@ -29,7 +29,7 @@ const Post = ({ post }) => {
   const favKey = `fav:${idStr(post._id)}`;
   const [favorite, setFavorite] = useState(() => localStorage.getItem(favKey) === "1");
 
-  const { user, suggestedUsers, posts, setPosts, onlineUsers, setSelectedPost, setAuthUser } = useApp();
+  const { user, posts, setPosts, setSelectedPost, setAuthUser } = useApp();
 
   const [liked, setLiked] = useState(hasId(post.likes, user?._id));
   const [postLike, setPostLike] = useState(Array.isArray(post.likes) ? post.likes.length : 0);
@@ -58,7 +58,7 @@ const Post = ({ post }) => {
       setPosts(updatedPosts);
       toast.success(liked ? "Post disliked" : "Post liked");
 
-      await api.post(`${API_URL}/api/v1/post/${post._id}/${action}`, {}, { withCredentials: true });
+      await api.post(`/api/v1/post/${post._id}/${action}`, {});
     } catch (error) {
       const reverted = posts.map((p) =>
         idStr(p._id) === idStr(post._id)
@@ -79,9 +79,8 @@ const Post = ({ post }) => {
   const commentHandler = async () => {
     try {
       const res = await api.post(
-        `${API_URL}/api/v1/post/${post._id}/comment`,
-        { text },
-        { headers: { "Content-Type": "application/json" }, withCredentials: true }
+        `/api/v1/post/${post._id}/comment`,
+        { text }
       );
 
       if (res.data.success) {
@@ -97,14 +96,13 @@ const Post = ({ post }) => {
       }
     } catch (error) {
       console.log(error);
+      toast.error(error.response?.data?.message || "Failed to add comment");
     }
   };
 
   const deletePostHandler = async () => {
     try {
-      const res = await api.delete(`${API_URL}/api/v1/post/delete/${post?._id}`, {
-        withCredentials: true,
-      });
+      const res = await api.delete(`/api/v1/post/delete/${post?._id}`);
       if (res.data.success) {
         const updatedPostData = posts.filter((p) => idStr(p?._id) !== idStr(post?._id));
         setPosts(updatedPostData);
@@ -139,7 +137,7 @@ const Post = ({ post }) => {
     setPosts(nextPosts);
 
     try {
-      const res = await api.post(`${API_URL}/api/v1/post/${post?._id}/bookmark`, {}, { withCredentials: true });
+      const res = await api.post(`/api/v1/post/${post?._id}/bookmark`, {});
 
       if (res?.data?.success) {
         if (res.data.user) {
@@ -178,8 +176,8 @@ const Post = ({ post }) => {
     const fetchConnections = async () => {
       try {
         const [followersRes, followingRes] = await Promise.all([
-          api.get(`${API_URL}/api/v1/user/${user._id}/followers`, { withCredentials: true }),
-          api.get(`${API_URL}/api/v1/user/${user._id}/following`, { withCredentials: true }),
+          api.get(`/api/v1/user/${user._id}/followers`),
+          api.get(`/api/v1/user/${user._id}/following`),
         ]);
 
         const followersList = followersRes.data?.success ? followersRes.data.users : [];
@@ -232,9 +230,8 @@ const Post = ({ post }) => {
       };
 
       const res = await api.post(
-        `${API_URL}/api/v1/message/send/${receiver._id}`,
-        { textMessage: JSON.stringify(payload) },
-        { headers: { "Content-Type": "application/json" }, withCredentials: true }
+        `/api/v1/message/send/${receiver._id}`,
+        { textMessage: JSON.stringify(payload) }
       );
 
       if (res.data?.success) {

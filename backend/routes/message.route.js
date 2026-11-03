@@ -1,5 +1,6 @@
 import express from "express";
 import isAuthenticated from "../middlewares/isAuthenticated.js";
+import { validateParamId } from "../middlewares/validateObjectId.js";
 import { 
     getMessage, 
     sendMessage, 
@@ -9,6 +10,8 @@ import {
 } from "../controllers/message.controller.js";
 
 const router = express.Router();
+
+router.param('id', validateParamId('id'));
 
 // Send & Get messages
 router.post('/send/:id', isAuthenticated, sendMessage);

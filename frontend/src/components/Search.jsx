@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import api, { API_URL } from "@/lib/axios";
+import api from "@/lib/axios";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Input } from "./ui/input";
 
@@ -14,15 +14,20 @@ export default function Search() {
   }, [q]);
 
   useEffect(() => {
+    let isCurrent = true;
     const run = async () => {
       if (!debounced.trim()) { setResults([]); return; }
-      const res = await api.get(
-        `${API_URL}/api/v1/user/search?query=${encodeURIComponent(debounced)}`,
-        { withCredentials: true }
-      );
-      setResults(res.data?.results || []);
+      try {
+        const res = await api.get(`/api/v1/user/search?query=${encodeURIComponent(debounced)}`);
+        if (isCurrent) setResults(res.data?.results || []);
+      } catch (err) {
+        if (isCurrent) console.error("Search error:", err);
+      }
     };
     run();
+    return () => {
+      isCurrent = false;
+    };
   }, [debounced]);
 
   const Row = (u) => (

@@ -1,16 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
-import api, { API_URL } from "@/lib/axios";
+import api from "@/lib/axios";
 import { useApp } from "@/context/AppContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Link, useNavigate, useParams } from "react-router-dom";
-
-const API_BASE = API_URL;
+import { toast } from "sonner";
 
 export default function FollowingPage() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { user, mergeAuthUser } = useApp();
+  const { mergeAuthUser } = useApp();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
   const [q, setQ] = useState("");
@@ -24,8 +23,11 @@ export default function FollowingPage() {
   const refresh = async () => {
     setLoading(true);
     try {
-      const { data } = await api.get(`${API_BASE}/api/v1/user/${id}/following`, { withCredentials: true });
+      const { data } = await api.get(`/api/v1/user/${id}/following`);
       if (data?.success) setUsers(data.users || []);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to load following");
     } finally {
       setLoading(false);
     }
@@ -35,11 +37,13 @@ export default function FollowingPage() {
 
   const toggleFollow = async (targetId) => {
     try {
-      const res = await api.post(`${API_BASE}/api/v1/user/followorunfollow/${targetId}`, {}, { withCredentials: true });
+      const res = await api.post(`/api/v1/user/followorunfollow/${targetId}`, {});
       if (res.data?.user) mergeAuthUser(res.data.user);
       setUsers(prev => prev.map(u => u._id === targetId ? { ...u, isFollowing: !u.isFollowing } : u));
+      toast.success(res.data?.message || "Follow status updated");
     } catch (e) {
       console.error(e);
+      toast.error(e.response?.data?.message || "Could not update follow");
     }
   };
 

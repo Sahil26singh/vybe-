@@ -11,8 +11,10 @@ const userSchema = new mongoose.Schema({
     following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     posts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }],
     bookmarks: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }],
-    embedding: [{ type: Number }],
-    embeddingSource: { type: String, enum: ['gemini', 'fallback'], default: null },
+    embedding: { type: [Number], select: false },
+    embeddingModel: { type: String },
+    embeddingStatus: { type: String, enum: ['none', 'pending', 'ready', 'failed'], default: 'none' },
+    embeddingAttempts: { type: Number, default: 0 },
     embeddingUpdatedAt: { type: Date }
 }, { timestamps: true });
 

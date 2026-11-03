@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from "react";
+/* eslint-disable react-refresh/only-export-components */
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo, useCallback } from "react";
 
 import { io } from "socket.io-client";
 import api, { API_URL } from "@/lib/axios";
@@ -21,7 +22,7 @@ export const AppProvider = ({ children }) => {
     try {
       const saved = localStorage.getItem("vybe_user");
       return saved ? normalizeUser(JSON.parse(saved)) : null;
-    } catch (e) {
+    } catch {
       return null;
     }
   });
@@ -46,6 +47,27 @@ export const AppProvider = ({ children }) => {
     });
   };
 
+  // Validate & sync login session with backend /me endpoint on mount
+  useEffect(() => {
+    let isCurrent = true;
+    const syncAuth = async () => {
+      try {
+        const res = await api.get('/api/v1/user/me');
+        if (isCurrent && res.data?.success && res.data.user) {
+          setAuthUser(res.data.user);
+        }
+      } catch (err) {
+        if (isCurrent && err.response?.status === 401) {
+          setAuthUser(null);
+        }
+      }
+    };
+    syncAuth();
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
+
   const [suggestedUsers, setSuggestedUsers] = useState([]);
   const [userProfile, setUserProfile] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -62,17 +84,17 @@ export const AppProvider = ({ children }) => {
   const [likeNotification, setLikeNotificationState] = useState([]);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
 
-  const fetchUnreadNotifCount = async () => {
+  const fetchUnreadNotifCount = useCallback(async () => {
     if (!user?._id) return;
     try {
-      const res = await api.get(`${API_URL}/api/v1/notification`, { withCredentials: true });
-      const list = Array.isArray(res.data?.data) ? res.data.data : [];
-      const count = list.filter((n) => !n.read).length;
-      setUnreadNotifCount(count);
+      const res = await api.get('/api/v1/notification/unread-count');
+      if (res.data?.success && typeof res.data.count === "number") {
+        setUnreadNotifCount(res.data.count);
+      }
     } catch (err) {
       console.error("fetchUnreadNotifCount error:", err);
     }
-  };
+  }, [user?._id]);
 
   useEffect(() => {
     if (user?._id) {
@@ -80,7 +102,7 @@ export const AppProvider = ({ children }) => {
     } else {
       setUnreadNotifCount(0);
     }
-  }, [user?._id]);
+  }, [user?._id, fetchUnreadNotifCount]);
 
   const setLikeNotification = (notification) => {
     if (!notification) return;
@@ -162,7 +184,27 @@ export const AppProvider = ({ children }) => {
       socketio.emit("registerUser", userId); // re-register on every connect/reconnect
     };
 
-    const onGetOnlineUsers = (users) => setOnlineUsers(users);
+    const onGetOnlineUsers = (users) => {
+      setOnlineUsers(Array.isArray(users) ? users.map(String) : []);
+    };
+
+    const onUserOnline = (onlineUserId) => {
+      if (!onlineUserId) return;
+      const idStr = String(onlineUserId);
+      setOnlineUsers((prev) => {
+        const list = Array.isArray(prev) ? prev.map(String) : [];
+        return list.includes(idStr) ? list : [...list, idStr];
+      });
+    };
+
+    const onUserOffline = (offlineUserId) => {
+      if (!offlineUserId) return;
+      const idStr = String(offlineUserId);
+      setOnlineUsers((prev) => {
+        const list = Array.isArray(prev) ? prev.map(String) : [];
+        return list.filter((id) => id !== idStr);
+      });
+    };
 
     const onNewNotification = (notification) => {
       setLikeNotification(notification);
@@ -176,6 +218,8 @@ export const AppProvider = ({ children }) => {
     socketio.on("connect", onConnect);
     socketio.on("connect_error", onConnectError);
     socketio.on("getOnlineUsers", onGetOnlineUsers);
+    socketio.on("userOnline", onUserOnline);
+    socketio.on("userOffline", onUserOffline);
     socketio.on("newNotification", onNewNotification);
 
     // If the socket is already connected (e.g. Strict Mode re-run), register immediately
@@ -188,11 +232,13 @@ export const AppProvider = ({ children }) => {
       socketio.off("connect", onConnect);
       socketio.off("connect_error", onConnectError);
       socketio.off("getOnlineUsers", onGetOnlineUsers);
+      socketio.off("userOnline", onUserOnline);
+      socketio.off("userOffline", onUserOffline);
       socketio.off("newNotification", onNewNotification);
     };
-  }, [user?._id]);
+  }, [user?._id, fetchUnreadNotifCount]);
 
-  const value = {
+  const value = useMemo(() => ({
     // Auth
     user,
     setAuthUser,
@@ -228,7 +274,20 @@ export const AppProvider = ({ children }) => {
     // Socket
     socket,
     setSocket,
-  };
+  }), [
+    user,
+    suggestedUsers,
+    userProfile,
+    selectedUser,
+    posts,
+    selectedPost,
+    onlineUsers,
+    messages,
+    likeNotification,
+    unreadNotifCount,
+    fetchUnreadNotifCount,
+    socket,
+  ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
