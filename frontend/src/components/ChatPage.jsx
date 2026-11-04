@@ -11,7 +11,7 @@ import { toast } from "sonner";
 
 const ChatPage = () => {
   const [textMessage, setTextMessage] = useState("");
-  const { user, selectedUser, setSelectedUser, onlineUsers, messages, setMessages, setUnreadChatCount } = useApp();
+  const { user, selectedUser, setSelectedUser, onlineUsers, setMessages, markChatAsRead } = useApp();
   const navigate = useNavigate();
   const { id: routeUserId } = useParams() || {};
 
@@ -20,10 +20,10 @@ const ChatPage = () => {
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    if (typeof setUnreadChatCount === "function") {
-      setUnreadChatCount(0);
+    if (selectedUser?._id && typeof markChatAsRead === "function") {
+      markChatAsRead(selectedUser._id);
     }
-  }, [selectedUser?._id, setUnreadChatCount]);
+  }, [selectedUser?._id, markChatAsRead]);
 
   // Fetch all connected users (followers + following)
   useEffect(() => {
@@ -85,19 +85,19 @@ const ChatPage = () => {
     }
   };
 
+  const selectedUserId = selectedUser?._id ? String(selectedUser._id) : null;
+
   useEffect(() => {
     if (!routeUserId) {
-      if (selectedUser) setSelectedUser(null);
-      if ((messages || []).length) setMessages([]);
+      setSelectedUser(null);
+      setMessages([]);
       return;
     }
 
     const wantId = String(routeUserId);
-    const currId = selectedUser?._id ? String(selectedUser._id) : null;
+    if (selectedUserId === wantId) return;
 
-    if (currId === wantId) return;
-
-    if ((messages || []).length) setMessages([]);
+    setMessages([]);
 
     const found = connectedUsers.find((u) => String(u?._id) === wantId);
     if (found) {
@@ -123,14 +123,14 @@ const ChatPage = () => {
         setMessages([]);
         navigate("/chat", { replace: true });
       });
-  }, [routeUserId, connectedUsers, navigate]);
+  }, [routeUserId, connectedUsers, navigate, selectedUserId, setSelectedUser, setMessages]);
 
   useEffect(() => {
     return () => {
       setSelectedUser(null);
       setMessages([]);
     };
-  }, []);
+  }, [setSelectedUser, setMessages]);
 
   return (
     <div className="flex h-screen w-full">

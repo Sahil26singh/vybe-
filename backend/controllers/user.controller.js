@@ -447,7 +447,7 @@ export const getSuggestedUsers = async (req, res) => {
                             index: vectorIndexName,
                             path: "embedding",
                             queryVector: loggedInUser.embedding,
-                            numCandidates: 200,
+                            numCandidates: 1000,
                             limit: 150,
                         }
                     },

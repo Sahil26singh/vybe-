@@ -464,17 +464,20 @@ export const getPostById = async (req, res) => {
 export const getLikedPosts = async (req, res) => {
     try {
         const userId = req.id;
+        const userObjId = mongoose.isValidObjectId(userId) ? new mongoose.Types.ObjectId(String(userId)) : userId;
         const page = Math.max(1, parseInt(req.query.page) || 1);
         const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
         const skip = (page - 1) * limit;
 
+        const likeQuery = { likes: { $in: [userObjId, String(userId)] } };
+
         const [posts, totalPosts] = await Promise.all([
-            Post.find({ likes: userId })
+            Post.find(likeQuery)
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
                 .populate({ path: 'author', select: 'username profilePicture' }),
-            Post.countDocuments({ likes: userId })
+            Post.countDocuments(likeQuery)
         ]);
 
         return res.status(200).json({

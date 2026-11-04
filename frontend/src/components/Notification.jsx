@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/lib/axios";
 import { useApp } from "@/context/AppContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -17,7 +17,7 @@ export default function Notification() {
 
   const unreadCount = useMemo(() => notifications.filter((n) => !n.read).length, [notifications]);
 
-  const fetchNotifications = async (targetPage = 1) => {
+  const fetchNotifications = useCallback(async (targetPage = 1) => {
     if (targetPage === 1) setLoading(true);
     else setLoadingMore(true);
     try {
@@ -43,7 +43,7 @@ export default function Notification() {
       setLoading(false);
       setLoadingMore(false);
     }
-  };
+  }, [fetchUnreadNotifCount]);
 
   const loadMore = () => {
     if (!loadingMore && hasMore) {
@@ -90,7 +90,7 @@ export default function Notification() {
 
   useEffect(() => {
     if (user?._id) fetchNotifications();
-  }, [user?._id]);
+  }, [user?._id, fetchNotifications]);
 
   return (
     <div className="flex flex-col w-full h-full p-3 sm:p-6 bg-white rounded shadow overflow-hidden">

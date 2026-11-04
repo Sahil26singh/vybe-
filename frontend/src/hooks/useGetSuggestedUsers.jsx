@@ -21,6 +21,6 @@ const useGetSuggestedUsers = () => {
         return () => {
             isCurrent = false;
         };
-    }, [user?._id, user?.following?.length]);
+    }, [user?._id, user?.following?.length, setSuggestedUsers]);
 };
 export default useGetSuggestedUsers;

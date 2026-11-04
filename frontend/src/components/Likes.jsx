@@ -86,7 +86,13 @@ export default function Likes() {
       ) : (
         <div className="w-full max-w-xl pb-10">
           {likedPosts.map((post) => (
-            <Post key={post._id} post={post} />
+            <Post
+              key={post._id}
+              post={post}
+              onUnlike={(unlikedPostId) =>
+                setLikedPosts((prev) => prev.filter((p) => String(p._id) !== String(unlikedPostId)))
+              }
+            />
           ))}
           {hasMore && (
             <div className="flex justify-center my-6">

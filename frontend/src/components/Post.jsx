@@ -19,7 +19,7 @@ const idStr = (x) => {
 };
 const hasId = (list, id) => Array.isArray(list) && list.map(idStr).includes(idStr(id));
 
-const Post = ({ post }) => {
+const Post = ({ post, onUnlike, onUnbookmark }) => {
   const navigate = useNavigate();
 
   const [text, setText] = useState("");
@@ -77,6 +77,9 @@ const Post = ({ post }) => {
     try {
       const action = wasLiked ? "dislike" : "like";
       toast.success(nextLiked ? "Post liked" : "Post disliked");
+      if (wasLiked && typeof onUnlike === "function") {
+        onUnlike(post._id);
+      }
       await api.post(`/api/v1/post/${post._id}/${action}`, {});
     } catch (error) {
       setLiked(wasLiked);
@@ -157,6 +160,9 @@ const Post = ({ post }) => {
             typeof id === "string" ? id : String(id)
           );
           setAuthUser({ ...serverUser, bookmarks: normalizedBookmarks });
+        }
+        if (wasBookmarked && typeof onUnbookmark === "function") {
+          onUnbookmark(post._id);
         }
         toast.success(res.data.message || (!wasBookmarked ? "Added to bookmarks" : "Removed from bookmarks"));
       } else {

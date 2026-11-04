@@ -82,6 +82,36 @@ export const AppProvider = ({ children }) => {
   const [messages, setMessages] = useState([]);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
+  const fetchUnreadChatCount = useCallback(async () => {
+    if (!user?._id) return;
+    try {
+      const res = await api.get('/api/v1/message/unread-count');
+      if (res.data?.success && typeof res.data.count === "number") {
+        setUnreadChatCount(res.data.count);
+      }
+    } catch (err) {
+      console.error("fetchUnreadChatCount error:", err);
+    }
+  }, [user?._id]);
+
+  useEffect(() => {
+    if (user?._id) {
+      fetchUnreadChatCount();
+    } else {
+      setUnreadChatCount(0);
+    }
+  }, [user?._id, fetchUnreadChatCount]);
+
+  const markChatAsRead = useCallback(async (partnerId) => {
+    if (!partnerId || !user?._id) return;
+    try {
+      await api.post(`/api/v1/message/${partnerId}/read`);
+      await fetchUnreadChatCount();
+    } catch (err) {
+      console.error("markChatAsRead error:", err);
+    }
+  }, [user?._id, fetchUnreadChatCount]);
+
   const selectedUserRef = useRef(selectedUser);
   useEffect(() => {
     selectedUserRef.current = selectedUser;
@@ -224,7 +254,8 @@ export const AppProvider = ({ children }) => {
       const senderId = newMessage.senderId?._id ? String(newMessage.senderId._id) : String(newMessage.senderId);
       if (senderId !== myId) {
         const activeChatUserId = selectedUserRef.current?._id ? String(selectedUserRef.current._id) : null;
-        if (senderId !== activeChatUserId) {
+        const isTabVisible = typeof document !== "undefined" ? document.visibilityState === "visible" : true;
+        if (senderId !== activeChatUserId || !isTabVisible) {
           setUnreadChatCount((prev) => prev + 1);
           const name = newMessage.senderUsername || "Someone";
           const snippet = newMessage.message ? (newMessage.message.length > 35 ? newMessage.message.slice(0, 35) + "..." : newMessage.message) : "sent you a message";
@@ -287,6 +318,8 @@ export const AppProvider = ({ children }) => {
     setMessages,
     unreadChatCount,
     setUnreadChatCount,
+    fetchUnreadChatCount,
+    markChatAsRead,
 
     // Notification
     likeNotification,
@@ -312,6 +345,8 @@ export const AppProvider = ({ children }) => {
     likeNotification,
     unreadNotifCount,
     unreadChatCount,
+    fetchUnreadChatCount,
+    markChatAsRead,
     fetchUnreadNotifCount,
     socket,
   ]);

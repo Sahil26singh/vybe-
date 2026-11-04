@@ -17,6 +17,7 @@ router.route('/me').get(isAuthenticated, getMe);
 router.route('/search').get(isAuthenticated, searchUsersByUsername);
 router.route('/suggested').get(isAuthenticated, getSuggestedUsers);
 router.route('/edit/profile').post(isAuthenticated, upload.single('profilePhoto'), validateBody(editProfileSchema), editProfile);
+router.route('/profile/edit').post(isAuthenticated, upload.single('profilePhoto'), validateBody(editProfileSchema), editProfile);
 router.route('/followorunfollow/:id').post(isAuthenticated, followOrUnfollow);
 
 router.route('/:id/followers').get(isAuthenticated, getFollowers);

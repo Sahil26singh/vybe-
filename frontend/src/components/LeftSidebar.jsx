@@ -22,7 +22,7 @@ import logo from '../assets/logo.png';
 const LeftSidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, setAuthUser, setSelectedPost, setPosts, unreadNotifCount, unreadChatCount, setUnreadChatCount } = useApp();
+  const { user, setAuthUser, setSelectedPost, setPosts, unreadNotifCount, unreadChatCount } = useApp();
 
   const [manualActive, setManualActive] = useState(null);
   const [open, setOpen] = useState(false);
@@ -34,12 +34,15 @@ const LeftSidebar = () => {
   const [connectionsError, setConnectionsError] = useState(null);
 
   useEffect(() => {
-    if (open) setManualActive("Create");
-    else if (manualActive === "Create") setManualActive(null);
+    if (open) {
+      setManualActive("Create");
+    } else {
+      setManualActive((prev) => (prev === "Create" ? null : prev));
+    }
   }, [open]);
 
   useEffect(() => {
-    if (manualActive && manualActive !== "Create") setManualActive(null);
+    setManualActive((prev) => (prev && prev !== "Create" ? null : prev));
   }, [location.pathname]);
 
   // Logout
@@ -68,7 +71,6 @@ const LeftSidebar = () => {
     } else if (textType === "Home") {
       navigate("/");
     } else if (textType === "Messages") {
-      if (typeof setUnreadChatCount === "function") setUnreadChatCount(0);
       navigate("/chat");
     } else if (textType === "Bookmarks") {
       navigate("/bookmarks");

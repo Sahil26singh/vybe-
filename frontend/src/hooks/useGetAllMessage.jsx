@@ -21,6 +21,6 @@ const useGetAllMessage = () => {
         return () => {
             isCurrent = false;
         };
-    }, [selectedUser?._id]);
+    }, [selectedUser?._id, setMessages]);
 };
 export default useGetAllMessage;

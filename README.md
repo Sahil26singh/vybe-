@@ -22,7 +22,7 @@ Vybe includes classic social features like creating posts, comments, likes, book
 
 - **Frontend**: React 19, Vite, Tailwind CSS, Radix UI primitives, Lucide React, Axios, Socket.IO Client
 - **Backend**: Node.js, Express 5, MongoDB Atlas (Mongoose 8), Socket.IO
-- **AI / Search**: Google Gemini API (`gemini-2.0-flash`, `gemini-embedding-001`), MongoDB Atlas Vector Search
+- **AI / Search**: Google Gemini API (`gemini-3.1-flash-lite`, `gemini-embedding-001`), MongoDB Atlas Vector Search
 - **Media**: Sharp (server-side image optimization), Cloudinary
 - **Authentication**: JWT stored in `httpOnly` secure cookies, bcrypt password hashing
 
@@ -109,7 +109,23 @@ VECTOR_INDEX_NAME=user_embedding_index
 ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8000
 ```
 
-> **Note on Vector Search**: To enable Tier A vector recommendations, configure an Atlas Search index named `user_embedding_index` on the `users` collection (`embedding` field, 768 dimensions, cosine similarity). If the index is not configured, the app gracefully falls back to mutual connections and popular accounts.
+> **Setting Up Atlas Vector Search (Optional)**: To enable semantic user recommendations:
+> 1. In MongoDB Atlas, go to **Search & Vector Search** -> **Create Search Index** -> select **Atlas Vector Search (JSON Editor)**.
+> 2. Select your database and the `users` collection.
+> 3. Name the index `user_embedding_index` and use this definition:
+> ```json
+> {
+>   "fields": [
+>     {
+>       "type": "vector",
+>       "path": "embedding",
+>       "numDimensions": 768,
+>       "similarity": "cosine"
+>     }
+>   ]
+> }
+> ```
+> *(If the index is not created, Vybe automatically and safely falls back to mutual connections and active user popularity.)*
 
 ### 4. Run the application
 
@@ -166,6 +182,8 @@ npm start
 ### Direct Messages
 - `POST /api/v1/message/send/:id` — Send a direct message
 - `GET /api/v1/message/all/:id` — Fetch chat history (supports pagination and `?before=<id>`)
+- `POST /api/v1/message/:id/read` — Mark incoming messages from a user as read
+- `GET /api/v1/message/unread-count` — Get total unread messages count
 - `PUT /api/v1/message/edit/:id` — Edit a sent message
 - `DELETE /api/v1/message/delete/:id` — Delete a sent message
 - `POST /api/v1/message/forward/:id` — Forward a message to another user

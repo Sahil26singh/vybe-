@@ -10,5 +10,6 @@ const postSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 postSchema.index({ author: 1, createdAt: -1 });
+postSchema.index({ likes: 1, createdAt: -1 });
 
 export const Post = mongoose.model('Post', postSchema);

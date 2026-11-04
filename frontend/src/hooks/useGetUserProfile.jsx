@@ -21,6 +21,6 @@ const useGetUserProfile = (userId) => {
         return () => {
             isCurrent = false;
         };
-    }, [userId]);
+    }, [userId, setUserProfile]);
 };
 export default useGetUserProfile;

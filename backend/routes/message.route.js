@@ -6,16 +6,22 @@ import {
     sendMessage, 
     editMessage, 
     deleteMessage, 
-    forwardMessage 
+    forwardMessage,
+    getUnreadMessagesCount,
+    markMessagesAsRead
 } from "../controllers/message.controller.js";
 
 const router = express.Router();
+
+router.get('/unread-count', isAuthenticated, getUnreadMessagesCount);
 
 router.param('id', validateParamId('id'));
 
 // Send & Get messages
 router.post('/send/:id', isAuthenticated, sendMessage);
 router.get('/all/:id', isAuthenticated, getMessage);
+router.post('/:id/read', isAuthenticated, markMessagesAsRead);
+router.post('/read/:id', isAuthenticated, markMessagesAsRead);
 
 // Message actions
 router.put('/:id', isAuthenticated, editMessage);           

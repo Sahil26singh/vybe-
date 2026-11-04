@@ -4,6 +4,76 @@ import { io } from "../socket/socket.js";
 import { Message } from "../models/message.model.js";
 import { User } from "../models/user.model.js";
 
+// In-memory cache for usernames to eliminate redundant User.findById queries on every message
+const usernameCache = new Map();
+const getCachedUsername = async (userId) => {
+  const id = String(userId);
+  if (usernameCache.has(id)) return usernameCache.get(id);
+  const u = await User.findById(id).select("username");
+  const name = u?.username || "";
+  if (name) usernameCache.set(id, name);
+  return name;
+};
+
+/**
+ * Finds or creates a conversation for a pair of users.
+ * If multiple split conversation documents exist from before the participantsKey fix,
+ * it merges all message IDs into the primary document, sets participantsKey, and deletes the duplicates.
+ */
+const getOrCreateMergedConversation = async (id1, id2) => {
+  const sortedParticipants = [String(id1), String(id2)].sort();
+  const participantsKey = sortedParticipants.join(":");
+
+  const matches = await Conversation.find({
+    $or: [
+      { participantsKey },
+      { participants: { $all: [id1, id2] } }
+    ]
+  }).sort({ createdAt: 1 });
+
+  if (!matches || matches.length === 0) {
+    return await Conversation.findOneAndUpdate(
+      { participantsKey },
+      {
+        $setOnInsert: {
+          participants: sortedParticipants,
+          participantsKey,
+          messages: []
+        }
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  }
+
+  const primary = matches[0];
+
+  // Self-heal: merge any split duplicate conversations from before the unique key fix
+  if (matches.length > 1) {
+    const allMessageIds = [];
+    const seen = new Set();
+    for (const c of matches) {
+      for (const m of (c.messages || [])) {
+        const mid = String(m);
+        if (!seen.has(mid)) {
+          seen.add(mid);
+          allMessageIds.push(m);
+        }
+      }
+    }
+    primary.messages = allMessageIds;
+    primary.participantsKey = participantsKey;
+    await primary.save();
+
+    const dupeIds = matches.slice(1).map(c => c._id);
+    await Conversation.deleteMany({ _id: { $in: dupeIds } });
+  } else if (!primary.participantsKey) {
+    primary.participantsKey = participantsKey;
+    await primary.save().catch(() => {});
+  }
+
+  return primary;
+};
+
 export const sendMessage = async (req, res) => {
   try {
     const senderId = req.id;
@@ -24,33 +94,7 @@ export const sendMessage = async (req, res) => {
     }
 
     const trimmedMessage = message.trim();
-    const sortedParticipants = [String(senderId), String(receiverId)].sort();
-    const participantsKey = sortedParticipants.join(":");
-
-    // find or create conversation (upsert on participantsKey prevents duplicate simultaneous conversations)
-    let conversation = await Conversation.findOne({
-      $or: [
-        { participantsKey },
-        { participants: { $all: [senderId, receiverId] } }
-      ]
-    });
-
-    if (!conversation) {
-      conversation = await Conversation.findOneAndUpdate(
-        { participantsKey },
-        {
-          $setOnInsert: {
-            participants: sortedParticipants,
-            participantsKey,
-            messages: []
-          }
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
-    } else if (!conversation.participantsKey) {
-      conversation.participantsKey = participantsKey;
-      await conversation.save().catch(() => {});
-    }
+    const conversation = await getOrCreateMergedConversation(senderId, receiverId);
 
     // create message
     const newMessage = await Message.create({
@@ -65,10 +109,10 @@ export const sendMessage = async (req, res) => {
     // emit realtime newMessage to both sender (other tabs) and receiver
     try {
       if (typeof io !== "undefined" && io) {
-        const senderUser = await User.findById(senderId).select("username profilePicture");
+        const senderUsername = await getCachedUsername(senderId);
         const messagePayload = {
           ...newMessage.toObject(),
-          senderUsername: senderUser?.username || ""
+          senderUsername
         };
         io.to(String(senderId)).to(String(receiverId)).emit("newMessage", messagePayload);
       }
@@ -92,15 +136,7 @@ export const getMessage = async (req, res) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
     const before = req.query.before;
 
-    const sortedParticipants = [String(senderId), String(receiverId)].sort();
-    const participantsKey = sortedParticipants.join(":");
-
-    const conversation = await Conversation.findOne({
-      $or: [
-        { participantsKey },
-        { participants: { $all: [senderId, receiverId] } }
-      ]
-    });
+    const conversation = await getOrCreateMergedConversation(senderId, receiverId);
     if (!conversation) {
       return res.status(200).json({ success: true, messages: [], totalMessages: 0, hasMore: false });
     }
@@ -147,6 +183,45 @@ export const getMessage = async (req, res) => {
   } catch (error) {
     console.log(error);
     return res.status(500).json({ success: false, message: "Failed to load messages" });
+  }
+};
+
+export const getUnreadMessagesCount = async (req, res) => {
+  try {
+    const userId = req.id;
+    const count = await Message.countDocuments({
+      receiverId: userId,
+      readAt: { $type: "null" }
+    });
+    return res.status(200).json({ success: true, count });
+  } catch (err) {
+    console.error("getUnreadMessagesCount error:", err);
+    return res.status(500).json({ success: false, message: "Failed to load unread messages count" });
+  }
+};
+
+export const markMessagesAsRead = async (req, res) => {
+  try {
+    const currentUserId = req.id;
+    const senderId = req.params.id;
+
+    if (!senderId) {
+      return res.status(400).json({ success: false, message: "Sender ID is required" });
+    }
+
+    const result = await Message.updateMany(
+      { senderId: senderId, receiverId: currentUserId, readAt: { $type: "null" } },
+      { $set: { readAt: new Date() } }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Messages marked as read",
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error("markMessagesAsRead error:", error);
+    return res.status(500).json({ success: false, message: "Failed to mark messages as read" });
   }
 };
 
@@ -231,32 +306,7 @@ export const forwardMessage = async (req, res) => {
     });
     if (!original) return res.status(404).json({ success: false, message: "Original message not found" });
 
-    // find or create conversation between sender and toUserId (upsert on participantsKey prevents duplicate simultaneous creations)
-    const sortedParticipants = [String(senderId), String(toUserId)].sort();
-    const participantsKey = sortedParticipants.join(":");
-
-    let conversation = await Conversation.findOne({
-      $or: [
-        { participantsKey },
-        { participants: { $all: [senderId, toUserId] } }
-      ]
-    });
-    if (!conversation) {
-      conversation = await Conversation.findOneAndUpdate(
-        { participantsKey },
-        {
-          $setOnInsert: {
-            participants: sortedParticipants,
-            participantsKey,
-            messages: []
-          }
-        },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
-    } else if (!conversation.participantsKey) {
-      conversation.participantsKey = participantsKey;
-      await conversation.save().catch(() => {});
-    }
+    const conversation = await getOrCreateMergedConversation(senderId, toUserId);
 
     // Create a new message with same text
     const newMsg = await Message.create({
@@ -269,10 +319,10 @@ export const forwardMessage = async (req, res) => {
     // Realtime emit to both sender (other tabs) and receiver if online
     try {
       if (typeof io !== "undefined" && io) {
-        const senderUser = await User.findById(senderId).select("username profilePicture");
+        const senderUsername = await getCachedUsername(senderId);
         const forwardPayload = {
           ...newMsg.toObject(),
-          senderUsername: senderUser?.username || ""
+          senderUsername
         };
         io.to(String(senderId)).to(String(toUserId)).emit("newMessage", forwardPayload);
       }

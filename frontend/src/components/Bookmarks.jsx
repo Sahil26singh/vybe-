@@ -98,7 +98,13 @@ export default function Bookmarks() {
       ) : (
         <div className="w-full max-w-xl pb-10">
           {visiblePosts.map((post) => (
-            <Post key={post._id} post={post} />
+            <Post
+              key={post._id}
+              post={post}
+              onUnbookmark={(unbookmarkedPostId) =>
+                setBookmarkedPosts((prev) => prev.filter((p) => String(p._id) !== String(unbookmarkedPostId)))
+              }
+            />
           ))}
           {hasMore && (
             <div className="flex justify-center my-6">

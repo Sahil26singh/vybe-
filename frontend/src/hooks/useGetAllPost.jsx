@@ -20,6 +20,6 @@ const useGetAllPost = () => {
         return () => {
             isCurrent = false;
         };
-    }, []);
+    }, [setPosts]);
 };
 export default useGetAllPost;

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/lib/axios";
 import { useApp } from "@/context/AppContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -20,7 +20,7 @@ export default function FollowingPage() {
     return users.filter(u => (u.username || "").toLowerCase().includes(t));
   }, [users, q]);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const { data } = await api.get(`/api/v1/user/${id}/following`);
@@ -31,9 +31,11 @@ export default function FollowingPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
-  useEffect(() => { if (id) refresh(); }, [id]);
+  useEffect(() => {
+    if (id) refresh();
+  }, [id, refresh]);
 
   const toggleFollow = async (targetId) => {
     try {
