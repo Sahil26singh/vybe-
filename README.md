@@ -1,149 +1,168 @@
 # Vybe
 
-A full-stack social media application built with React, Node.js, Express, and MongoDB Atlas.
+Vybe is a modern, full-stack social networking platform engineered with React 19, Node.js, Express 5, and MongoDB Atlas. It delivers instant 1-on-1 real-time messaging with Socket.IO, multi-tab presence synchronization, and interactive social feeds, alongside AI-assisted capabilities powered by Google Gemini (multimodal content moderation, automated image captioning, and 768-dimensional semantic user recommendations via MongoDB Atlas Vector Search).
 
-Vybe includes classic social features like creating posts, comments, likes, bookmarks, and real-time direct messaging, alongside AI-assisted features powered by Google Gemini (content moderation, image captioning, and semantic user recommendations via MongoDB Atlas Vector Search).
+**Live Demo**: [https://vybe-ymdg.onrender.com](https://vybe-ymdg.onrender.com)  
+**Demo Account**:
+- **Email**: `sahil26@gmail.com` | **Password**: `12345`
+- **Username**: `sahil`
+---
+
+## Preview
+
+![Vybe Preview](frontend/public/image.png)
 
 ---
 
-## Features
+## System Architecture
 
-- **Post Feed**: Create posts with images and captions, with pagination and real-time like/comment updates.
-- **AI-Powered Recommendations**: Suggested users are ranked using MongoDB Atlas Vector Search (cosine similarity on 768-dimensional Gemini embeddings built from user bios and recent post captions), with automatic fallback to mutual connections and active user popularity.
-- **Direct Messaging**: 1-on-1 real-time chat via Socket.IO with multi-tab synchronization, online status indicators, cursor-based pagination, and support for editing, deleting, and forwarding messages.
-- **AI Assist Tools**: Automatic caption generation for images, accessibility alt-text generation, and safety moderation before posts are saved.
-- **Notifications**: Instant socket notifications for likes and comments, plus unread message alerts.
-- **Bookmarks & Likes**: Dedicated paginated pages for browsing saved and liked posts.
-- **Profile Management**: Profile pages with follower/following lists, connection counts, and editable bios and avatars.
+```mermaid
+flowchart TD
+    subgraph Client ["Frontend (React 19 + Vite + Tailwind CSS)"]
+        UI["SPA Interface (Feed, Chat, Profile, Notifications)"]
+        State["AppContext & Custom Hooks (RTM, Visibility Sync)"]
+        SocketClient["Socket.IO Client (Real-time Events)"]
+        AxiosClient["Axios Client (REST API + JWT HttpOnly Cookie)"]
+    end
+
+    subgraph Server ["Backend (Node.js + Express 5)"]
+        Middleware["Security Middleware (Helmet CSP, CORS, Rate Limiting)"]
+        AuthGuard["Auth & ObjectId Validation Guards"]
+        Router["Express REST Routes (Auth, Post, Message, User)"]
+        SocketServer["Socket.IO Server (Multi-tab Presence, Rooms)"]
+        Cache["Bounded TTL Cache (Usernames & Mutuals, LRU)"]
+        EmbeddingWorker["In-Process Embedding Worker (p-limit concurrency)"]
+    end
+
+    subgraph DataServices ["External & Cloud Services"]
+        MongoAtlas[("MongoDB Atlas\n(Mongoose 8 Documents & Collections)")]
+        AtlasVector[("Atlas Vector Search\n(768-dim Cosine Similarity on user_embedding_index)")]
+        GeminiAPI["Google Gemini AI\n(gemini-3.1-flash-lite, gemini-embedding-001)"]
+        CloudinaryCDN["Cloudinary & Sharp\n(Image Optimization & Media Storage)"]
+    end
+
+    UI --> State
+    State --> SocketClient
+    State --> AxiosClient
+
+    SocketClient <-->|WebSocket / WSS| SocketServer
+    AxiosClient -->|HTTP / HTTPS| Middleware
+
+    Middleware --> AuthGuard --> Router
+    Router --> Cache
+    Router --> SocketServer
+    Router --> MongoAtlas
+    Router --> CloudinaryCDN
+    Router --> GeminiAPI
+    EmbeddingWorker --> GeminiAPI
+    Router --> AtlasVector
+    MongoAtlas <--> AtlasVector
+```
+
+---
+
+## Key Features
+
+- **Semantic Recommendations (Atlas Vector Search)**: Suggested users are computed using MongoDB Atlas Vector Search (cosine similarity on 768-dimensional Gemini embeddings generated from user bios and recent post captions), with resilient fallback to mutual connection graphs.
+- **Direct Messaging & Real-Time Sync**: Real-time 1-on-1 chat powered by Socket.IO with multi-tab presence tracking, tab visibility-aware read receipts (`readAt`), message editing, deletion, and message forwarding.
+- **Fail-Closed AI Content Moderation**: Image uploads and captions pass through automated Google Gemini policy classifiers before persistence. Fails closed on policy violations or unconfigured keys in production.
+- **AI Assist Tools**: One-click AI caption generation from image previews, automated accessibility alt-text generation, and background embedding generation.
+- **Social Feed & Engagement**: Responsive post feed with media uploads, nested comments, like tracking, bookmark collections, and user profile management.
+- **Security & Hygiene**: Cookie-based JWT authentication (`httpOnly`, `sameSite`, `secure`), rate limiting on sensitive routes, strict Helmet Content Security Policy, and sanitized error responses.
 
 ---
 
 ## Tech Stack
 
-- **Frontend**: React 19, Vite, Tailwind CSS, Radix UI primitives, Lucide React, Axios, Socket.IO Client
-- **Backend**: Node.js, Express 5, MongoDB Atlas (Mongoose 8), Socket.IO
-- **AI / Search**: Google Gemini API (`gemini-3.1-flash-lite`, `gemini-embedding-001`), MongoDB Atlas Vector Search
-- **Media**: Sharp (server-side image optimization), Cloudinary
-- **Authentication**: JWT stored in `httpOnly` secure cookies, bcrypt password hashing
+| Layer | Technologies |
+|---|---|
+| **Frontend** | React 19, Vite, Tailwind CSS, Radix UI Primitives, Lucide Icons, Sonner, Axios, Socket.IO Client |
+| **Backend** | Node.js, Express 5, Socket.IO, Mongoose 8, Helmet, Express Rate Limit, Sharp, Multer |
+| **Database & AI** | MongoDB Atlas, Atlas Vector Search, Google Gemini API (`gemini-3.1-flash-lite`, `gemini-embedding-001`) |
+| **Cloud & Media** | Cloudinary, Render |
 
 ---
 
-## Project Structure
-
-```
-vybe/
-├── backend/
-│   ├── config/              # CORS allowed origins
-│   ├── controllers/         # Route logic (user, post, message, notification)
-│   ├── middlewares/         # Auth, multer, and validation guards
-│   ├── models/              # Mongoose schemas (User, Post, Message, Conversation, etc.)
-│   ├── routes/              # Express route declarations
-│   ├── services/            # Background embedding queue with rate-limiting
-│   ├── socket/              # Socket.IO handlers and online presence tracking
-│   └── utils/               # Gemini AI helpers, Cloudinary config, DB connection
-│
-└── frontend/
-    ├── src/
-    │   ├── components/      # React components (Feed, ChatPage, PostDetail, etc.)
-    │   ├── context/         # AppContext (auth, active chat, socket lifecycle)
-    │   ├── hooks/           # Custom data fetching and real-time hooks
-    │   └── lib/             # Axios instance and utilities
-    └── ...
-```
-
----
-
-## Getting Started
+## Setup & Local Installation
 
 ### Prerequisites
+- Node.js (v20 or higher recommended)
+- A MongoDB Atlas cluster (M0 free tier supported)
+- Cloudinary account credentials
+- Google Gemini API key
 
-- Node.js (v18 or higher)
-- A MongoDB Atlas cluster (M0 free tier works)
-- A Cloudinary account for media hosting
-- A Google Gemini API key
-
-### 1. Clone the repository
-
+### 1. Clone & Install Dependencies
 ```bash
 git clone https://github.com/Sahil26singh/vybe-.git
 cd vybe-
-```
 
-### 2. Install dependencies
-
-```bash
-# Install backend dependencies
+# Install root & backend dependencies
 npm install
 
 # Install frontend dependencies
-cd frontend
-npm install
-cd ..
+npm install --prefix frontend
 ```
 
-### 3. Setup environment variables
-
-Create a `.env` file in the project root:
-
-```env
-PORT=8000
-NODE_ENV=development
-
-# Database
-MONGO_URI=mongodb+srv://<username>:<password>@cluster.mongodb.net/vybe
-
-# Authentication
-SECRET_KEY=your_jwt_secret_key
-
-# Cloudinary
-CLOUD_NAME=your_cloudinary_cloud_name
-API_KEY=your_cloudinary_api_key
-API_SECRET=your_cloudinary_api_secret
-
-# Gemini AI & Vector Search
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_EMBEDDING_MODEL=gemini-embedding-001
-VECTOR_INDEX_NAME=user_embedding_index
-
-# CORS
-ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8000
-```
-
-> **Setting Up Atlas Vector Search (Optional)**: To enable semantic user recommendations:
-> 1. In MongoDB Atlas, go to **Search & Vector Search** -> **Create Search Index** -> select **Atlas Vector Search (JSON Editor)**.
-> 2. Select your database and the `users` collection.
-> 3. Name the index `user_embedding_index` and use this definition:
-> ```json
-> {
->   "fields": [
->     {
->       "type": "vector",
->       "path": "embedding",
->       "numDimensions": 768,
->       "similarity": "cosine"
->     }
->   ]
-> }
-> ```
-> *(If the index is not created, Vybe automatically and safely falls back to mutual connections and active user popularity.)*
-
-### 4. Run the application
-
-Start both the backend and frontend in development:
-
+### 2. Configure Environment Variables
+Copy `.env.example` to `.env`:
 ```bash
-# Terminal 1: Backend
-npm run dev
-
-# Terminal 2: Frontend
-cd frontend
-npm run dev
+cp .env.example .env
 ```
 
-The frontend will run at `http://localhost:5173` and the backend server at `http://localhost:8000`.
+| Variable | Description | Example / Default |
+|---|---|---|
+| `PORT` | Backend server port | `8000` |
+| `NODE_ENV` | Environment mode (`development` or `production`) | `development` |
+| `URL` | Frontend origin for CORS | `http://localhost:5173` |
+| `MONGO_URI` | MongoDB Atlas connection string | `mongodb+srv://...` |
+| `SECRET_KEY` | JWT signing secret | `your_secure_secret_key` |
+| `CLOUD_NAME` | Cloudinary cloud name | `your_cloud_name` |
+| `API_KEY` | Cloudinary API key | `your_api_key` |
+| `API_SECRET` | Cloudinary API secret | `your_api_secret` |
+| `GEMINI_API_KEY` | Google Gemini API key | `your_gemini_api_key` |
+| `GEMINI_MODEL` | Gemini text & vision model | `gemini-3.1-flash-lite` |
+| `GEMINI_EMBEDDING_MODEL` | Gemini embedding model | `gemini-embedding-001` |
+| `VECTOR_INDEX_NAME` | Atlas Vector Search index name | `user_embedding_index` |
+| `MODERATION_MODE` | Moderation fallback policy (`block` or `allow`) | `block` |
 
-To build for production:
+### 3. Create the Atlas Vector Search Index (Optional but Recommended)
+In MongoDB Atlas:
+1. Navigate to **Search & Vector Search** -> **Create Search Index**.
+2. Choose **Atlas Vector Search (JSON Editor)**.
+3. Target the `users` collection in your database.
+4. Name the index `user_embedding_index` and supply the configuration from [`vector-index.json`](./vector-index.json):
+```json
+{
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 768,
+      "similarity": "cosine"
+    },
+    {
+      "type": "filter",
+      "path": "embeddingModel"
+    },
+    {
+      "type": "filter",
+      "path": "embeddingStatus"
+    }
+  ]
+}
+```
 
+### 4. Run Development Servers
+```bash
+# Terminal 1: Backend API
+npm run dev
+
+# Terminal 2: Frontend Client
+npm run dev --prefix frontend
+```
+The client will start at `http://localhost:5173` and proxy/connect to API at `http://localhost:8000`.
+
+### 5. Production Build & Execution (Local Render Simulation)
 ```bash
 npm run build
 npm start
@@ -151,49 +170,37 @@ npm start
 
 ---
 
-## API Overview
+## Maintenance Scripts
 
-### Authentication & Users
-- `POST /api/v1/user/register` — Register a new account
-- `POST /api/v1/user/login` — Log in and set httpOnly JWT cookie
-- `POST /api/v1/user/logout` — Clear session cookie
-- `GET /api/v1/user/suggested` — Suggested users (Vector Search -> Mutuals -> Popular)
-- `GET /api/v1/user/profile/:id` — Get user profile by ID
-- `POST /api/v1/user/profile/edit` — Edit bio, gender, and avatar
-- `POST /api/v1/user/followorunfollow/:id` — Follow or unfollow a user
-- `GET /api/v1/user/:id/followers` — List user's followers
-- `GET /api/v1/user/:id/following` — List user's following
+- **`node backend/scripts/mergeDuplicateConversations.js`**: Safe conversation cleanup utility. Runs in dry-run mode by default; add `--apply` to merge split legacy conversations and backfill unique `participantsKey` indexes.
+- **`node backend/scripts/backfillEmbeddings.js`**: Evaluates all users, generates 768-dim vector embeddings, and stores status. Add `--apply` to write to the database.
+- **`node backend/scripts/backup.js`**: Exports all MongoDB collections to timestamped JSON files in `backend/backups/`.
+- **`node backend/scripts/test_concurrency.js`**: Concurrency regression test demonstrating E11000 duplicate race handling, atomic `$addToSet` merging, and single-document convergence.
 
-### Posts
-- `GET /api/v1/post/all` — Paginated home feed posts
-- `GET /api/v1/post/:id` — Get single post by ID
-- `POST /api/v1/post/addpost` — Create new post with image upload
-- `POST /api/v1/post/generate-caption` — Generate AI caption from image preview
-- `POST /api/v1/post/:id/like` — Like a post
-- `POST /api/v1/post/:id/dislike` — Remove like
-- `POST /api/v1/post/:id/bookmark` — Bookmark or un-bookmark post
-- `GET /api/v1/post/liked` — Paginated list of posts liked by current user
-- `GET /api/v1/post/bookmarked` — Paginated list of posts saved by current user
-- `DELETE /api/v1/post/delete/:id` — Delete a post (author only)
-- `POST /api/v1/post/:id/comment` — Add a comment
-- `GET /api/v1/post/:id/comments` — Get comments for a post
-- `DELETE /api/v1/post/:postId/comment/:commentId` — Delete a comment
+---
 
-### Direct Messages
-- `POST /api/v1/message/send/:id` — Send a direct message
-- `GET /api/v1/message/all/:id` — Fetch chat history (supports pagination and `?before=<id>`)
-- `POST /api/v1/message/:id/read` — Mark incoming messages from a user as read
-- `GET /api/v1/message/unread-count` — Get total unread messages count
-- `PUT /api/v1/message/edit/:id` — Edit a sent message
-- `DELETE /api/v1/message/delete/:id` — Delete a sent message
-- `POST /api/v1/message/forward/:id` — Forward a message to another user
+## Known Limitations & Scaling Plan
 
-### Notifications
-- `GET /api/v1/notification` — Get user notifications (likes, comments)
-- `GET /api/v1/notification/unread-count` — Get count of unread notifications
+This application was architected with clear boundaries to demonstrate modern full-stack capabilities. Below are the architectural tradeoffs made and the corresponding enterprise scaling path:
+
+1. **Presence & Online Status**:
+   - *Current*: Handled in-memory on the Node.js server using a `Map<userId, Set<socketId>>` and broadcast via Socket.IO.
+   - *Scaling Plan*: Replace in-memory state with **Redis Pub/Sub** and an atomic presence set (`SET <userId>:presence <timestamp> EX 60`). Allows horizontal scaling across multiple load-balanced Node.js / Socket.IO instances with sticky sessions or a Redis adapter.
+
+2. **Asynchronous Embedding Workers**:
+   - *Current*: Profile text embeddings are generated asynchronously in-process with a `p-limit(3)` queue and debouncing timers.
+   - *Scaling Plan*: Offload vector generation to a distributed task queue (e.g., **BullMQ + Redis** or AWS SQS). This isolates heavy external AI API latency and rate-limiting from the web server, enabling independent worker autoscaling and automatic retry policies with dead-letter queues.
+
+3. **Schema Normalization (Likes & Messages as Arrays)**:
+   - *Current*: Post likes (`[ObjectId]`) and conversation message IDs (`[ObjectId]`) are stored as embedded arrays within their parent documents for fast, single-document retrieval.
+   - *Scaling Plan*: While optimal for small to medium scale, documents with viral interaction could approach MongoDB's 16MB document limit. Transition likes to an indexed `likes` collection with compound indexing `{ targetId: 1, userId: 1 }` and partition conversation messages into a dedicated `messages` collection with cursor-based windowing.
+
+4. **Distributed Rate Limiting**:
+   - *Current*: Route rate limiting uses in-memory sliding window counters (`express-rate-limit`).
+   - *Scaling Plan*: Switch to `rate-limit-redis` so that rate-limit quotas and authentication attempt caps are shared across all cluster processes.
 
 ---
 
 ## License
 
-MIT License. Built by [Sahil Singh](https://github.com/Sahil26singh).
+MIT License. Engineered by [Sahil Singh](https://github.com/Sahil26singh).

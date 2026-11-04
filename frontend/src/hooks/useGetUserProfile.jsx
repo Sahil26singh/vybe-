@@ -6,6 +6,7 @@ const useGetUserProfile = (userId) => {
     const { setUserProfile } = useApp();
     useEffect(() => {
         let isCurrent = true;
+        setUserProfile(null);
         const fetchUserProfile = async () => {
             if (!userId) return;
             try {

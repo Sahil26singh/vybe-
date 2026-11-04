@@ -8,6 +8,7 @@ import { io } from "../socket/socket.js";
 import { Notification } from "../models/notification.model.js";
 import { generateAltText, generateAICaption, moderateContent } from "../utils/gemini.js";
 import { queueEmbedding } from "../services/embedding.service.js";
+import { invalidateSuggestedUsersCache } from "./user.controller.js";
 
 // DELETE a comment 
 export const deleteComment = async (req, res) => {
@@ -100,6 +101,7 @@ export const addNewPost = async (req, res) => {
             await user.save();
             // Queue author profile embedding update in background with new post caption
             queueEmbedding(authorId);
+            invalidateSuggestedUsersCache();
         }
 
         await post.populate({ path: 'author', select: '-password -embedding -embeddingModel -embeddingStatus -embeddingAttempts' });
@@ -369,6 +371,10 @@ export const deletePost = async (req,res) => {
 
         // 5. Delete post
         await Post.findByIdAndDelete(postId);
+
+        // Update author profile embedding and invalidate suggested users cache
+        queueEmbedding(authorId);
+        invalidateSuggestedUsersCache();
 
         return res.status(200).json({
             success:true,

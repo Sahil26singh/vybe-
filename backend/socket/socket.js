@@ -15,7 +15,6 @@ const io = new Server(server, {
         credentials: true,
     },
     transports: ['websocket', 'polling'],
-    allowEIO3: true,
     pingTimeout: 60000,
     pingInterval: 25000,
 });
@@ -44,18 +43,6 @@ io.use((socket, next) => {
 
 // Map<userId, Set<socketId>>: tracks active sockets per user for multi-tab presence
 const userSocketMap = new Map();
-
-// Helper to check if a user has any active sockets
-export const isUserOnline = (userId) => userSocketMap.has(String(userId));
-
-// Helper returning active user room ID or null (backward compatible)
-export const getReceiverSocketId = (receiverId) => {
-    const id = String(receiverId);
-    return userSocketMap.has(id) ? id : null;
-};
-
-// Helper returning array of currently online user IDs
-export const getOnlineUsers = () => Array.from(userSocketMap.keys());
 
 io.on('connection', (socket) => {
     const userId = socket.userId ? String(socket.userId) : null;

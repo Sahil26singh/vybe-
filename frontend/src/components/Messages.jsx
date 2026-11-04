@@ -3,7 +3,6 @@ import api from "@/lib/axios";
 import { useApp } from "@/context/AppContext";
 import useGetAllMessage from "@/hooks/useGetAllMessage";
 import useGetRTM from "@/hooks/useGetRTM";
-import useGetSuggestedUsers from "@/hooks/useGetSuggestedUsers";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Button } from "./ui/button";
 import { useNavigate } from "react-router-dom";
@@ -98,7 +97,6 @@ function ModalFooter({ children }) {
 const Messages = () => {
   useGetRTM();
   useGetAllMessage();
-  useGetSuggestedUsers();
 
   const { messages, setMessages, user, selectedUser } = useApp();
   const containerRef = useRef(null);

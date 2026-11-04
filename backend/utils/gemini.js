@@ -106,7 +106,7 @@ export const generateAICaption = async (imageBuffer) => {
 export const moderateContent = async (imageBuffer, caption = "") => {
     const mode = process.env.MODERATION_MODE || "block";
     if (!getGenAI()) {
-        if (mode === "allow") {
+        if (mode === "allow" && process.env.NODE_ENV !== "production") {
             console.warn("[Content Moderation] No GEMINI_API_KEY configured; MODERATION_MODE allows post in dev mode.");
             return { safe: true, reason: "" };
         }
@@ -139,10 +139,6 @@ Respond ONLY with JSON: {"safe": boolean, "reason": string}. "reason" should be 
         };
     } catch (error) {
         console.log("moderateContent error:", error.message);
-        if (mode === "allow") {
-            console.warn("[Content Moderation] Moderation API error; MODERATION_MODE allows post in dev mode.");
-            return { safe: true, reason: "" };
-        }
         return {
             safe: false,
             reason: "Content moderation check could not be completed. Please try again later.",

@@ -3,12 +3,13 @@ import { Conversation } from "../models/conversation.model.js";
 import { io } from "../socket/socket.js";
 import { Message } from "../models/message.model.js";
 import { User } from "../models/user.model.js";
+import { usernameCache } from "../utils/cache.js";
 
-// In-memory cache for usernames to eliminate redundant User.findById queries on every message
-const usernameCache = new Map();
+// In-memory bounded TTL cache for usernames to eliminate redundant User.findById queries on every message
 const getCachedUsername = async (userId) => {
   const id = String(userId);
-  if (usernameCache.has(id)) return usernameCache.get(id);
+  const cached = usernameCache.get(id);
+  if (cached !== undefined) return cached;
   const u = await User.findById(id).select("username");
   const name = u?.username || "";
   if (name) usernameCache.set(id, name);
@@ -16,62 +17,34 @@ const getCachedUsername = async (userId) => {
 };
 
 /**
- * Finds or creates a conversation for a pair of users.
- * If multiple split conversation documents exist from before the participantsKey fix,
- * it merges all message IDs into the primary document, sets participantsKey, and deletes the duplicates.
+ * Finds or creates a conversation for a pair of users by participantsKey (used for sendMessage and forwardMessage).
  */
 const getOrCreateMergedConversation = async (id1, id2) => {
   const sortedParticipants = [String(id1), String(id2)].sort();
   const participantsKey = sortedParticipants.join(":");
 
-  const matches = await Conversation.find({
-    $or: [
-      { participantsKey },
-      { participants: { $all: [id1, id2] } }
-    ]
-  }).sort({ createdAt: 1 });
-
-  if (!matches || matches.length === 0) {
-    return await Conversation.findOneAndUpdate(
-      { participantsKey },
-      {
-        $setOnInsert: {
-          participants: sortedParticipants,
-          participantsKey,
-          messages: []
-        }
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-  }
-
-  const primary = matches[0];
-
-  // Self-heal: merge any split duplicate conversations from before the unique key fix
-  if (matches.length > 1) {
-    const allMessageIds = [];
-    const seen = new Set();
-    for (const c of matches) {
-      for (const m of (c.messages || [])) {
-        const mid = String(m);
-        if (!seen.has(mid)) {
-          seen.add(mid);
-          allMessageIds.push(m);
-        }
-      }
+  try {
+    let conversation = await Conversation.findOne({ participantsKey });
+    if (!conversation) {
+      conversation = await Conversation.findOneAndUpdate(
+        { participantsKey },
+        {
+          $setOnInsert: {
+            participants: sortedParticipants,
+            participantsKey,
+            messages: []
+          }
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
     }
-    primary.messages = allMessageIds;
-    primary.participantsKey = participantsKey;
-    await primary.save();
-
-    const dupeIds = matches.slice(1).map(c => c._id);
-    await Conversation.deleteMany({ _id: { $in: dupeIds } });
-  } else if (!primary.participantsKey) {
-    primary.participantsKey = participantsKey;
-    await primary.save().catch(() => {});
+    return conversation;
+  } catch (err) {
+    if (err.code === 11000 || err.message?.includes("E11000")) {
+      return await Conversation.findOne({ participantsKey });
+    }
+    throw err;
   }
-
-  return primary;
 };
 
 export const sendMessage = async (req, res) => {
@@ -136,14 +109,19 @@ export const getMessage = async (req, res) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
     const before = req.query.before;
 
-    const conversation = await getOrCreateMergedConversation(senderId, receiverId);
+    const sortedParticipants = [String(senderId), String(receiverId)].sort();
+    const participantsKey = sortedParticipants.join(":");
+
+    // Read-only: find existing conversation by participantsKey without creating, merging or deleting
+    const conversation = await Conversation.findOne({ participantsKey });
+
     if (!conversation) {
       return res.status(200).json({ success: true, messages: [], totalMessages: 0, hasMore: false });
     }
 
-    const totalMessages = conversation.messages.length;
+    const totalMessages = (conversation.messages || []).length;
 
-    let messageFilter = { _id: { $in: conversation.messages } };
+    let messageFilter = { _id: { $in: conversation.messages || [] } };
 
     // Cursor-based pagination support (?before=<lastMessageId>)
     if (before && mongoose.isValidObjectId(before)) {

@@ -21,7 +21,6 @@ router.param('id', validateParamId('id'));
 router.post('/send/:id', isAuthenticated, sendMessage);
 router.get('/all/:id', isAuthenticated, getMessage);
 router.post('/:id/read', isAuthenticated, markMessagesAsRead);
-router.post('/read/:id', isAuthenticated, markMessagesAsRead);
 
 // Message actions
 router.put('/:id', isAuthenticated, editMessage);           

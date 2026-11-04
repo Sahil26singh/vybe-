@@ -1,10 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Link } from 'react-router-dom';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
+import { Button } from './ui/button';
+import api from '@/lib/axios';
+import { toast } from 'sonner';
 
 const SuggestedUsers = () => {
-  const { suggestedUsers, user } = useApp();
+  const { suggestedUsers, user, mergeAuthUser, setSuggestedUsers, fetchSuggestedUsers } = useApp();
+  const [followingMap, setFollowingMap] = useState({});
 
   const toId = (x) => (x && typeof x === "object" ? String(x._id || x) : String(x || ""));
 
@@ -19,6 +23,31 @@ const SuggestedUsers = () => {
     const iAlreadyFollow = followingIds.includes(uid);
     return !isMe && !iAlreadyFollow;
   });
+
+  const handleFollow = async (targetId) => {
+    if (followingMap[targetId]) return;
+    setFollowingMap((prev) => ({ ...prev, [targetId]: true }));
+
+    // Optimistically remove from suggested users
+    setSuggestedUsers((prev) =>
+      (prev || []).filter((u) => String(u?._id || u) !== String(targetId))
+    );
+
+    try {
+      const res = await api.post(`/api/v1/user/followorunfollow/${targetId}`, {});
+      if (res.data?.success) {
+        if (res.data.user) {
+          mergeAuthUser(res.data.user);
+        }
+        fetchSuggestedUsers(true);
+        toast.success(res.data.message || "Followed successfully");
+      }
+    } catch (err) {
+      setFollowingMap((prev) => ({ ...prev, [targetId]: false }));
+      fetchSuggestedUsers(true);
+      toast.error(err?.response?.data?.message || "Could not follow user");
+    }
+  };
 
   if (!visibleUsers || visibleUsers.length === 0) {
     return (
@@ -51,12 +80,18 @@ const SuggestedUsers = () => {
               <h1 className="font-semibold text-sm hover:font-normal">
                 <Link to={`/profile/${u?._id}`}>{u?.username}</Link>
               </h1>
-              <span className="text-gray-600 text-sm">{u?.bio || 'Bio here...'}</span>
+              <span className="text-gray-600 text-xs line-clamp-1 max-w-[130px]">{u?.bio || 'Bio here...'}</span>
             </div>
           </div>
-          <span className="text-[#3BADF8] text-xs font-bold cursor-pointer hover:text-[#3495d6]">
-            <Link to={`/profile/${u?._id}`}>Profile</Link>
-          </span>
+          <Button
+            size="sm"
+            variant="default"
+            className="h-7 text-xs bg-[#0095F6] hover:bg-[#3192d2]"
+            disabled={followingMap[u._id]}
+            onClick={() => handleFollow(u._id)}
+          >
+            {followingMap[u._id] ? "Following" : "Follow"}
+          </Button>
         </div>
       ))}
     </div>

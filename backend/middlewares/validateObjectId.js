@@ -15,24 +15,5 @@ export const validateParamId = (paramName = "id") => {
   };
 };
 
-/**
- * Route middleware to validate that one or more req.params are valid ObjectIds
- */
-export const validateObjectId = (paramNames = ["id"]) => {
-  const names = Array.isArray(paramNames) ? paramNames : [paramNames];
-  return (req, res, next) => {
-    for (const name of names) {
-      const val = req.params[name];
-      if (val && !mongoose.isValidObjectId(val)) {
-        return res.status(400).json({
-          message: `Invalid ${name}: '${val}' is not a valid ObjectId`,
-          success: false,
-        });
-      }
-    }
-    next();
-  };
-};
-
-export default validateObjectId;
+export default validateParamId;
 

@@ -7,7 +7,7 @@ import { generateUserEmbedding } from "../utils/gemini.js";
 // Concurrency limiter: max 3 simultaneous Gemini embedding API calls
 const limit = pLimit(3);
 
-const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+const COOLDOWN_MS = 5000; // 5 seconds debounce
 const lastProcessedAt = new Map(); // userId (string) -> timestamp (ms)
 const trailingTimers = new Map();   // userId (string) -> setTimeout handle
 const inFlight = new Set();        // userId (string)
@@ -15,7 +15,7 @@ const inFlight = new Set();        // userId (string)
 /**
  * Builds representative text for a user using their bio + up to 5 recent post captions.
  * Does NOT include the username.
- * If total text is shorter than 20 characters, returns null (not enough signal).
+ * If total text is shorter than 5 characters, returns null (not enough signal).
  */
 export const buildProfileText = async (user) => {
   if (!user) return null;
@@ -36,7 +36,7 @@ export const buildProfileText = async (user) => {
   if (captions.length > 0) parts.push(captions.join(". "));
 
   const combined = parts.join(". ").trim();
-  if (combined.length < 20) {
+  if (combined.length < 5) {
     return null;
   }
   return combined;
@@ -89,6 +89,12 @@ export const processUserEmbedding = async (userId) => {
     user.embeddingUpdatedAt = new Date();
     await user.save();
     console.log(`[Embedding Service] Ready: 768-dim vector for @${user.username} using [${result.model}]`);
+    try {
+      const { invalidateSuggestedUsersCache } = await import("../controllers/user.controller.js");
+      invalidateSuggestedUsersCache();
+    } catch (e) {
+      // ignore
+    }
   } else {
     user.embeddingStatus = "failed";
     user.embeddingAttempts = attempts;

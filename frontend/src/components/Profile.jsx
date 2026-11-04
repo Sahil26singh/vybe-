@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import useGetUserProfile from "@/hooks/useGetUserProfile";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -9,10 +9,6 @@ import { useApp } from "@/context/AppContext";
 import { toast } from "sonner";
 import { AtSign, Heart, MessageCircle } from "lucide-react";
 
-const toId = (x) => (x && typeof x === "object" ? String(x._id) : String(x));
-const hasId = (arr, id) => (arr || []).some((x) => toId(x) === String(id));
-const withoutId = (arr, id) => (arr || []).filter((x) => toId(x) !== String(id));
-
 const Profile = () => {
   const navigate = useNavigate();
   const params = useParams();
@@ -20,48 +16,73 @@ const Profile = () => {
 
   useGetUserProfile(userId);
 
-  const { posts, userProfile, user, setAuthUser, setUserProfile } = useApp();
+  const {
+    posts,
+    userProfile,
+    user,
+    mergeAuthUser,
+    setUserProfile,
+    suggestedUsers,
+    setSuggestedUsers,
+    fetchSuggestedUsers,
+  } = useApp();
 
   const [activeTab, setActiveTab] = useState("posts");
 
   const meId = String(user?._id || "");
-  const targetId = String(userProfile?._id || "");
+  const targetId = String(userId || userProfile?._id || "");
 
-  const isLoggedInUserProfile = meId && targetId && meId === targetId;
+  const isLoggedInUserProfile = Boolean(meId && targetId && meId === targetId);
 
-  const computedIsFollowing = useMemo(() => {
-    if (!meId || !targetId) return false;
-    if (Array.isArray(userProfile?.followers)) {
-      return hasId(userProfile.followers, meId);
-    }
-    return hasId(user?.following, targetId);
-  }, [userProfile?.followers, user?.following, meId, targetId]);
-
-  const [isFollowing, setIsFollowing] = useState(computedIsFollowing);
-
-  useEffect(() => {
-    setIsFollowing(computedIsFollowing);
-  }, [computedIsFollowing]);
+  const isFollowing = useMemo(() => {
+    if (!meId || !targetId || meId === targetId) return false;
+    return (user?.following || []).some((f) => String(f?._id || f) === targetId);
+  }, [user?.following, meId, targetId]);
 
   const handleTabChange = (tab) => setActiveTab(tab);
 
   const handleFollowToggle = async () => {
-    if (!meId || !targetId) return;
+    if (!meId || !targetId || meId === targetId) return;
 
-    const prevUser = user;
-    const prevProfile = userProfile;
+    const currentlyFollowing = isFollowing;
+    const prevFollowing = user?.following || [];
+    const prevProfileFollowers = userProfile?.followers || [];
+    const prevSuggested = suggestedUsers;
 
-    const nextFollowing = isFollowing
-      ? withoutId(user?.following, targetId)
-      : [...(user?.following || []), targetId];
+    const nextFollowing = currentlyFollowing
+      ? prevFollowing.filter((f) => String(f?._id || f) !== targetId)
+      : [...prevFollowing, targetId];
 
-    const nextFollowers = isFollowing
-      ? withoutId(userProfile?.followers, meId)
-      : [...(userProfile?.followers || []), meId];
+    const nextProfileFollowers = currentlyFollowing
+      ? prevProfileFollowers.filter((f) => String(f?._id || f) !== meId)
+      : [...prevProfileFollowers, meId];
 
-    setIsFollowing(!isFollowing);
-    setAuthUser({ ...user, following: nextFollowing });
-    setUserProfile({ ...userProfile, followers: nextFollowers });
+    // Optimistic update
+    mergeAuthUser({ following: nextFollowing });
+    setUserProfile((prev) =>
+      prev ? { ...prev, followers: nextProfileFollowers } : prev
+    );
+
+    // Optimistically update suggestedUsers
+    if (currentlyFollowing && userProfile) {
+      setSuggestedUsers((prev) => {
+        const idStr = String(targetId);
+        const filtered = (prev || []).filter((u) => String(u?._id || u) !== idStr);
+        return [
+          {
+            _id: userProfile._id || targetId,
+            username: userProfile.username || "",
+            profilePicture: userProfile.profilePicture || "",
+            bio: userProfile.bio || "",
+          },
+          ...filtered,
+        ];
+      });
+    } else if (!currentlyFollowing) {
+      setSuggestedUsers((prev) =>
+        (prev || []).filter((u) => String(u?._id || u) !== String(targetId))
+      );
+    }
 
     try {
       const res = await api.post(
@@ -73,11 +94,21 @@ const Profile = () => {
         throw new Error(res.data?.message || "Follow action failed");
       }
 
-      toast.success(res.data.message || (!isFollowing ? "Followed" : "Unfollowed"));
+      if (res.data.user) {
+        mergeAuthUser(res.data.user);
+      }
+
+      // Refresh suggestions from server
+      fetchSuggestedUsers(true);
+
+      toast.success(res.data.message || (currentlyFollowing ? "Unfollowed" : "Followed"));
     } catch (err) {
-      setIsFollowing(isFollowing);
-      setAuthUser(prevUser);
-      setUserProfile(prevProfile);
+      // Rollback on failure
+      mergeAuthUser({ following: prevFollowing });
+      setUserProfile((prev) =>
+        prev ? { ...prev, followers: prevProfileFollowers } : prev
+      );
+      setSuggestedUsers(prevSuggested);
       toast.error(err?.response?.data?.message || "Could not update follow");
       console.error(err);
     }
@@ -135,14 +166,20 @@ const Profile = () => {
                   <span className="font-semibold">{userProfile?.posts?.length || 0} </span>
                   posts
                 </p>
-                <p>
+                <Link
+                  to={`/profile/${targetId}/followers`}
+                  className="hover:underline cursor-pointer"
+                >
                   <span className="font-semibold">{userProfile?.followers?.length || 0} </span>
                   followers
-                </p>
-                <p>
+                </Link>
+                <Link
+                  to={`/profile/${targetId}/following`}
+                  className="hover:underline cursor-pointer"
+                >
                   <span className="font-semibold">{userProfile?.following?.length || 0} </span>
                   following
-                </p>
+                </Link>
               </div>
 
               <div className="flex flex-col gap-1">

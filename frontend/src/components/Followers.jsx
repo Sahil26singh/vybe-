@@ -9,7 +9,7 @@ import { toast } from "sonner";
 export default function FollowersPage() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { mergeAuthUser } = useApp();
+  const { mergeAuthUser, setSuggestedUsers, fetchSuggestedUsers } = useApp();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState([]);
   const [q, setQ] = useState("");
@@ -38,10 +38,35 @@ export default function FollowersPage() {
   }, [id, refresh]);
 
   const toggleFollow = async (targetId) => {
+    const targetUser = users.find((u) => u._id === targetId);
+    const wasFollowing = targetUser ? targetUser.isFollowing : true;
+
+    // Optimistically update suggested users
+    if (wasFollowing && targetUser) {
+      setSuggestedUsers((prev) => {
+        const idStr = String(targetId);
+        const filteredList = (prev || []).filter((u) => String(u?._id || u) !== idStr);
+        return [
+          {
+            _id: targetUser._id,
+            username: targetUser.username || "",
+            profilePicture: targetUser.profilePicture || "",
+            bio: targetUser.bio || "",
+          },
+          ...filteredList,
+        ];
+      });
+    } else if (!wasFollowing) {
+      setSuggestedUsers((prev) =>
+        (prev || []).filter((u) => String(u?._id || u) !== String(targetId))
+      );
+    }
+
     try {
       const res = await api.post(`/api/v1/user/followorunfollow/${targetId}`, {});
       if (res.data?.user) mergeAuthUser(res.data.user);
       setUsers(prev => prev.map(u => u._id === targetId ? { ...u, isFollowing: !u.isFollowing } : u));
+      fetchSuggestedUsers(true);
       toast.success(res.data?.message || "Follow status updated");
     } catch (e) {
       console.error(e);

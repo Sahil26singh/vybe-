@@ -38,3 +38,5 @@ Thumbs.db
 # Agent Scratch & Temp
 .gemini/
 brain/
+backend/backups/
+backups/

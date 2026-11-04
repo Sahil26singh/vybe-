@@ -14,6 +14,8 @@ const normalizeUser = (u) => {
   if (!u) return u;
   const safe = { ...u };
   safe.bookmarks = (u.bookmarks || []).map(normalizeId);
+  safe.following = (u.following || []).map(normalizeId);
+  safe.followers = (u.followers || []).map(normalizeId);
   return safe;
 };
 
@@ -72,6 +74,27 @@ export const AppProvider = ({ children }) => {
   const [suggestedUsers, setSuggestedUsers] = useState([]);
   const [userProfile, setUserProfile] = useState(null);
   const [selectedUser, setSelectedUser] = useState(null);
+
+  const fetchSuggestedUsers = useCallback(async (force = false) => {
+    if (!user?._id) return;
+    try {
+      const url = force ? '/api/v1/user/suggested?refresh=true' : '/api/v1/user/suggested';
+      const res = await api.get(url);
+      if (res.data?.success && Array.isArray(res.data.users)) {
+        setSuggestedUsers(res.data.users);
+      }
+    } catch (err) {
+      console.error("fetchSuggestedUsers error:", err);
+    }
+  }, [user?._id]);
+
+  useEffect(() => {
+    if (user?._id) {
+      fetchSuggestedUsers();
+    } else {
+      setSuggestedUsers([]);
+    }
+  }, [user?._id, fetchSuggestedUsers]);
 
   // --- Post State ---
   const [posts, setPosts] = useState([]);
@@ -218,7 +241,6 @@ export const AppProvider = ({ children }) => {
 
     const onConnect = () => {
       console.log("Socket connected:", socketio.id);
-      socketio.emit("registerUser", userId); // re-register on every connect/reconnect
     };
 
     const onGetOnlineUsers = (users) => {
@@ -276,11 +298,6 @@ export const AppProvider = ({ children }) => {
     socketio.on("newNotification", onNewNotification);
     socketio.on("newMessage", onNewMessage);
 
-    // If the socket is already connected (e.g. Strict Mode re-run), register immediately
-    if (socketio.connected) {
-      socketio.emit("registerUser", userId);
-    }
-
     return () => {
       // Remove only the handlers added in this effect run — never disconnect the socket
       socketio.off("connect", onConnect);
@@ -300,6 +317,7 @@ export const AppProvider = ({ children }) => {
     mergeAuthUser,
     suggestedUsers,
     setSuggestedUsers,
+    fetchSuggestedUsers,
     userProfile,
     setUserProfile,
     selectedUser,
@@ -346,6 +364,7 @@ export const AppProvider = ({ children }) => {
     unreadNotifCount,
     unreadChatCount,
     fetchUnreadChatCount,
+    fetchSuggestedUsers,
     markChatAsRead,
     fetchUnreadNotifCount,
     socket,

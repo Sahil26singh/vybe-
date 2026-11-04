@@ -8,15 +8,18 @@ import { Post } from "../models/post.model.js";
 import { Notification } from "../models/notification.model.js";
 import { io } from "../socket/socket.js";
 import { queueEmbedding } from "../services/embedding.service.js";
+import { usernameCache } from "../utils/cache.js";
 
 // In-memory 5-minute cache for suggested users: userId -> { users, source, expiresAt }
 const suggestionsCache = new Map();
 
-export const invalidateSuggestedUsersCache = (userId) => {
+export function invalidateSuggestedUsersCache(userId) {
   if (userId) {
     suggestionsCache.delete(String(userId));
+  } else {
+    suggestionsCache.clear();
   }
-};
+}
 
 // Return followers list populated with minimal fields
 export const getFollowers = async (req, res) => {
@@ -378,6 +381,12 @@ export const editProfile = async (req, res) => {
 
         await user.save();
 
+        // Invalidate username cache
+        usernameCache.delete(String(userId));
+
+        // Invalidate suggestions cache so profile changes are reflected
+        invalidateSuggestedUsersCache();
+
         // Queue user embedding vector update in background when profile changes
         queueEmbedding(userId);
 
@@ -400,17 +409,20 @@ export const getSuggestedUsers = async (req, res) => {
     const loggedInUserId = String(req.id);
     try {
         const limitParam = Math.min(20, Math.max(1, parseInt(req.query.limit) || 10));
+        const forceRefresh = req.query.refresh === "true";
 
-        // 1. Check in-memory 5-minute cache
-        const cached = suggestionsCache.get(loggedInUserId);
-        if (cached && cached.expiresAt > Date.now()) {
-            const durationMs = Date.now() - startTime;
-            console.log(`[SuggestedUsers] userId=${loggedInUserId} source=${cached.source} (cached) durationMs=${durationMs} resultCount=${cached.users.length}`);
-            return res.status(200).json({
-                success: true,
-                users: cached.users.slice(0, limitParam),
-                source: cached.source
-            });
+        // 1. Check in-memory 5-minute cache (unless forced refresh)
+        if (!forceRefresh) {
+            const cached = suggestionsCache.get(loggedInUserId);
+            if (cached && cached.expiresAt > Date.now()) {
+                const durationMs = Date.now() - startTime;
+                console.log(`[SuggestedUsers] userId=${loggedInUserId} source=${cached.source} (cached) durationMs=${durationMs} resultCount=${cached.users.length}`);
+                return res.status(200).json({
+                    success: true,
+                    users: cached.users.slice(0, limitParam),
+                    source: cached.source
+                });
+            }
         }
 
         const loggedInUser = await User.findById(loggedInUserId)
@@ -429,7 +441,7 @@ export const getSuggestedUsers = async (req, res) => {
         const excludeObjectIds = [myObjectId, ...followingObjectIds];
 
         let results = [];
-        let source = "popular";
+        let source = "none";
 
         // TIER A: Atlas Vector Search
         const hasReadyVector =
@@ -525,44 +537,6 @@ export const getSuggestedUsers = async (req, res) => {
             }
         }
 
-        // TIER C: Popular users (highest follower count)
-        if (results.length < limitParam) {
-            try {
-                const alreadyFoundIds = results.map(u => u._id);
-                const currentExclude = [...excludeObjectIds, ...alreadyFoundIds];
-                const needed = limitParam - results.length;
-
-                const popularMatches = await User.aggregate([
-                    { $match: { _id: { $nin: currentExclude } } },
-                    {
-                        $addFields: {
-                            followerCount: { $size: { $ifNull: ["$followers", []] } }
-                        }
-                    },
-                    { $sort: { followerCount: -1, createdAt: -1 } },
-                    { $limit: needed },
-                    {
-                        $project: {
-                            _id: 1,
-                            username: 1,
-                            profilePicture: 1,
-                            bio: 1,
-                            followerCount: 1
-                        }
-                    }
-                ]);
-
-                if (popularMatches && popularMatches.length > 0) {
-                    if (results.length === 0) {
-                        source = "popular";
-                    }
-                    results = results.concat(popularMatches);
-                }
-            } catch (popErr) {
-                console.error("[SuggestedUsers] Tier C popular users error:", popErr.message);
-            }
-        }
-
         // Clean output: NEVER return password, email, bookmarks, embedding, or embedding internal fields
         const sanitizedUsers = results.slice(0, limitParam).map(u => ({
             _id: u._id,
@@ -571,7 +545,6 @@ export const getSuggestedUsers = async (req, res) => {
             bio: u.bio || "",
             ...(u.score !== undefined ? { score: u.score } : {}),
             ...(u.mutualCount !== undefined ? { mutualCount: u.mutualCount } : {}),
-            ...(u.followerCount !== undefined ? { followerCount: u.followerCount } : {}),
         }));
 
         // Cache result for 5 minutes
@@ -620,14 +593,14 @@ export const followOrUnfollow = async (req, res) => {
         const followingStrings = (user.following || []).map(String);
         const isFollowing = followingStrings.includes(jiskoFollowKrunga);
 
-        // Invalidate suggestions cache for the actor who followed/unfollowed
-        invalidateSuggestedUsersCache(followKrneWala);
-
         if (isFollowing) {
             await Promise.all([
                 User.updateOne({ _id: followKrneWala }, { $pull: { following: jiskoFollowKrunga } }),
                 User.updateOne({ _id: jiskoFollowKrunga }, { $pull: { followers: followKrneWala } }),
             ]);
+            // Invalidate suggestions cache after DB update commits
+            invalidateSuggestedUsersCache(followKrneWala);
+            invalidateSuggestedUsersCache(jiskoFollowKrunga);
             const updatedUser = await User.findById(followKrneWala).select("-password -embedding -embeddingModel -embeddingStatus -embeddingAttempts");
             return res.status(200).json({ message: 'Unfollowed successfully', success: true, user: updatedUser });
         } else {
@@ -635,6 +608,9 @@ export const followOrUnfollow = async (req, res) => {
                 User.updateOne({ _id: followKrneWala }, { $addToSet: { following: jiskoFollowKrunga } }),
                 User.updateOne({ _id: jiskoFollowKrunga }, { $addToSet: { followers: followKrneWala } }),
             ]);
+            // Invalidate suggestions cache after DB update commits
+            invalidateSuggestedUsersCache(followKrneWala);
+            invalidateSuggestedUsersCache(jiskoFollowKrunga);
             try {
                 const notif = await Notification.create({
                     to: jiskoFollowKrunga,
