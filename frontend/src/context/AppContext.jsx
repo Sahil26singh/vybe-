@@ -3,6 +3,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useMemo,
 
 import { io } from "socket.io-client";
 import api, { API_URL } from "@/lib/axios";
+import { toast } from "sonner";
 
 const AppContext = createContext(null);
 
@@ -79,6 +80,12 @@ export const AppProvider = ({ children }) => {
   // --- Chat State ---
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
+
+  const selectedUserRef = useRef(selectedUser);
+  useEffect(() => {
+    selectedUserRef.current = selectedUser;
+  }, [selectedUser]);
 
   // --- Real-time Notification State ---
   const [likeNotification, setLikeNotificationState] = useState([]);
@@ -211,6 +218,21 @@ export const AppProvider = ({ children }) => {
       fetchUnreadNotifCount();
     };
 
+    const onNewMessage = (newMessage) => {
+      if (!newMessage) return;
+      const myId = String(userId);
+      const senderId = newMessage.senderId?._id ? String(newMessage.senderId._id) : String(newMessage.senderId);
+      if (senderId !== myId) {
+        const activeChatUserId = selectedUserRef.current?._id ? String(selectedUserRef.current._id) : null;
+        if (senderId !== activeChatUserId) {
+          setUnreadChatCount((prev) => prev + 1);
+          const name = newMessage.senderUsername || "Someone";
+          const snippet = newMessage.message ? (newMessage.message.length > 35 ? newMessage.message.slice(0, 35) + "..." : newMessage.message) : "sent you a message";
+          toast.info(`Message from ${name}: "${snippet}"`);
+        }
+      }
+    };
+
     const onConnectError = (err) => {
       console.warn("Socket connect error:", err.message);
     };
@@ -221,6 +243,7 @@ export const AppProvider = ({ children }) => {
     socketio.on("userOnline", onUserOnline);
     socketio.on("userOffline", onUserOffline);
     socketio.on("newNotification", onNewNotification);
+    socketio.on("newMessage", onNewMessage);
 
     // If the socket is already connected (e.g. Strict Mode re-run), register immediately
     if (socketio.connected) {
@@ -235,6 +258,7 @@ export const AppProvider = ({ children }) => {
       socketio.off("userOnline", onUserOnline);
       socketio.off("userOffline", onUserOffline);
       socketio.off("newNotification", onNewNotification);
+      socketio.off("newMessage", onNewMessage);
     };
   }, [user?._id, fetchUnreadNotifCount]);
 
@@ -261,6 +285,8 @@ export const AppProvider = ({ children }) => {
     setOnlineUsers,
     messages,
     setMessages,
+    unreadChatCount,
+    setUnreadChatCount,
 
     // Notification
     likeNotification,
@@ -285,6 +311,7 @@ export const AppProvider = ({ children }) => {
     messages,
     likeNotification,
     unreadNotifCount,
+    unreadChatCount,
     fetchUnreadNotifCount,
     socket,
   ]);

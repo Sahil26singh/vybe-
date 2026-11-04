@@ -97,7 +97,7 @@ export default function Notification() {
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-lg font-semibold">Notifications</h3>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={fetchNotifications}>
+          <Button size="sm" variant="ghost" onClick={() => fetchNotifications(1)}>
             Refresh
           </Button>
           <Button size="sm" onClick={markAllRead} disabled={unreadCount === 0}>

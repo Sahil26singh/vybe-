@@ -28,13 +28,10 @@ app.use(
         imgSrc: ["'self'", "data:", "blob:", "https://res.cloudinary.com", "https:"],
         connectSrc: [
           "'self'",
-          "ws:",
-          "wss:",
-          "http:",
-          "https:",
           "https://res.cloudinary.com",
           "https://vybe-ymdg.onrender.com",
           "wss://vybe-ymdg.onrender.com",
+          ...(process.env.NODE_ENV !== "production" ? ["ws://localhost:*", "http://localhost:*"] : []),
         ],
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https:"],
@@ -58,6 +55,7 @@ app.use(cors(corsOptions));
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
+  skipSuccessfulRequests: true,
   message: { success: false, message: "Too many attempts, please try again later." },
   standardHeaders: true,
   legacyHeaders: false,
@@ -70,12 +68,29 @@ app.use("/api/v1/user", userRoute);
 app.use("/api/v1/post", postRoute);
 app.use("/api/v1/message", messageRoute);
 
+// Explicit 404 handler for unknown API routes
+app.all(/^\/api(\/.*)?$/, (req, res) => {
+  return res.status(404).json({
+    success: false,
+    message: `API route not found: ${req.method} ${req.originalUrl}`
+  });
+});
+
 // Error handling middleware for API routes (including Multer limit/type errors)
 app.use((err, req, res, next) => {
   if (err) {
-    return res.status(400).json({
+    const isClientError = err.name === "MulterError" || err.name === "ValidationError" || (err.status && err.status < 500) || (err.statusCode && err.statusCode < 500);
+    const statusCode = isClientError ? (err.status || err.statusCode || 400) : 500;
+    const message = statusCode === 500 && process.env.NODE_ENV === "production"
+      ? "Internal server error"
+      : (err.message || "An error occurred");
+
+    if (statusCode >= 500) {
+      console.error("Internal Server Error:", err);
+    }
+    return res.status(statusCode).json({
       success: false,
-      message: err.message || "An error occurred"
+      message
     });
   }
   next();

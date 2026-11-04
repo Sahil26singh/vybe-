@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Dialog, DialogContent, DialogTrigger } from './ui/dialog';
+import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription } from './ui/dialog';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Link, useNavigate } from 'react-router-dom';
 import { MoreHorizontal } from 'lucide-react';
@@ -102,6 +102,8 @@ const CommentDialog = ({ open, setOpen }) => {
   return (
     <Dialog open={open}>
       <DialogContent onInteractOutside={() => setOpen(false)} className="max-w-5xl p-0 flex flex-col">
+        <DialogTitle className="sr-only">Post Comments</DialogTitle>
+        <DialogDescription className="sr-only">View and post comments.</DialogDescription>
         <div className="flex flex-1">
           <div className="w-1/2">
             <img
@@ -132,6 +134,8 @@ const CommentDialog = ({ open, setOpen }) => {
                   <MoreHorizontal className='cursor-pointer' />
                 </DialogTrigger>
                 <DialogContent className="flex flex-col items-center text-sm text-center">
+                  <DialogTitle className="sr-only">Post Options</DialogTitle>
+                  <DialogDescription className="sr-only">Post options menu.</DialogDescription>
                   <div onClick={()=>{navigate(`/profile/${selectedPost?.author?._id}`)}} className='cursor-pointer w-full text-[#ED4956] font-bold'>
                     Profile
                   </div>

@@ -448,7 +448,7 @@ export const getSuggestedUsers = async (req, res) => {
                             path: "embedding",
                             queryVector: loggedInUser.embedding,
                             numCandidates: 200,
-                            limit: 60,
+                            limit: 150,
                         }
                     },
                     {
@@ -475,7 +475,7 @@ export const getSuggestedUsers = async (req, res) => {
                     source = "vector";
                 }
             } catch (vectorErr) {
-                // Vector search not available yet (e.g. index building or fallback)
+                console.error("[SuggestedUsers] Vector search error:", vectorErr.message);
                 // Gracefully continue to Tier B
             }
         }

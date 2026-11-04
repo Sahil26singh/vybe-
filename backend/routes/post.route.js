@@ -14,7 +14,10 @@ import {
     getAllPost, 
     getCommentsOfPost, 
     getUserPost, 
-    likePost 
+    likePost,
+    getPostById,
+    getLikedPosts,
+    getBookmarkedPosts
 } from "../controllers/post.controller.js";
 
 const router = express.Router();
@@ -27,6 +30,9 @@ router.route("/addpost").post(isAuthenticated, upload.single('image'), addNewPos
 router.route("/generate-caption").post(isAuthenticated, upload.single('image'), generateCaption);
 router.route("/all").get(isAuthenticated, getAllPost);
 router.route("/userpost/all").get(isAuthenticated, getUserPost);
+router.route("/liked").get(isAuthenticated, getLikedPosts);
+router.route("/bookmarked").get(isAuthenticated, getBookmarkedPosts);
+router.route("/:id").get(isAuthenticated, getPostById);
 router.route("/:id/like").post(isAuthenticated, likePost);
 router.route("/:id/dislike").post(isAuthenticated, dislikePost);
 router.route("/:id/comment").post(isAuthenticated, validateBody(addCommentSchema), addComment); 

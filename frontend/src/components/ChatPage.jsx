@@ -11,13 +11,19 @@ import { toast } from "sonner";
 
 const ChatPage = () => {
   const [textMessage, setTextMessage] = useState("");
-  const { user, selectedUser, setSelectedUser, onlineUsers, messages, setMessages } = useApp();
+  const { user, selectedUser, setSelectedUser, onlineUsers, messages, setMessages, setUnreadChatCount } = useApp();
   const navigate = useNavigate();
   const { id: routeUserId } = useParams() || {};
 
   const [connectedUsers, setConnectedUsers] = useState([]);
   const [loadingConnections, setLoadingConnections] = useState(false);
   const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (typeof setUnreadChatCount === "function") {
+      setUnreadChatCount(0);
+    }
+  }, [selectedUser?._id, setUnreadChatCount]);
 
   // Fetch all connected users (followers + following)
   useEffect(() => {

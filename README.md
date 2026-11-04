@@ -1,176 +1,181 @@
-# 🌊 Vybe — Full-Stack AI-Powered Social Platform
+# Vybe
 
-Vybe is a modern, real-time social networking web application designed and built on the **MERN stack** (MongoDB, Express.js, React 19, Node.js). 
+A full-stack social media application built with React, Node.js, Express, and MongoDB Atlas.
 
-It combines traditional social features—like posting, liking, commenting, and real-time chat—with **Google Gemini AI** for semantic vector recommendations, automated vision captioning, accessibility alt-text generation, and AI safety moderation.
-
----
-
-## 📸 Key Features & Architecture Highlights
-
-### 🧠 1. AI-Driven User Recommendations (Vector Embeddings & Cosine Similarity)
-- **Profile Semantic Indexing**: Aggregates a user's bio, profile metadata, and their 5 most recent post captions into a unified context text string.
-- **768-Dim Embeddings**: Generates 768-dimensional L2-normalized vector embeddings via Google's `text-embedding-004` model.
-- **Cosine Similarity Ranking**: Real-time vector matching scores candidate profiles against the logged-in user to recommend people with aligned interests.
-- **Graceful Fallbacks**: Includes an in-memory deterministic L2 unit-norm feature hashing algorithm if AI API keys are unconfigured or rate-limited.
-
-### ✨ 2. Multimodal AI Vision & Accessibility
-- **Automatic Post Caption Generation**: Uses Google Gemini 2.0 Flash Vision AI to analyze uploaded image buffers and generate engaging social captions with emojis and hashtags.
-- **Screen Reader Alt-Text (a11y)**: Automatically creates concise, descriptive alt-text for uploaded images to ensure accessibility compliance.
-- **AI Content Moderation**: Scans image buffers and text captions for policy violations before storing media or writing to the database.
-
-### ⚡ 3. Low-Latency Real-Time Direct Messaging & Presence
-- **Socket.IO Integration**: Persistent bi-directional WebSocket connection for instant 1-on-1 messaging.
-- **Live Online Presence**: Tracks active socket connections (`userId -> socketId`) to display real-time online/offline green status indicators.
-- **Rich Message Actions**: Supports sending, editing, deleting, and forwarding messages to other users.
-
-### 🔔 4. Real-Time Notification Engine
-- **Instant Alerts**: Emits socket events for likes, comments, and new followers.
-- **Synced Unread Badge Count**: App-wide unread badge counter synchronized across components using React Context API.
-
-### 🛡️ 5. Security & Performance Engineering
-- **HTTP-Only JWT Cookies**: Authentication tokens are stored in `HttpOnly`, `SameSite` cookies to prevent Cross-Site Scripting (XSS) token theft.
-- **In-Memory Image Compression**: Resizes and compresses image buffers using `sharp` (JPEG quality 80, max 800x800) before uploading to Cloudinary to save network bandwidth.
-- **Database Query Optimizations**: Uses `.lean()` for faster POJO queries, `$in` batch operators to eliminate N+1 query loops, and atomic `$addToSet`/`$pull` operators for race-condition-free likes.
-- **ReDoS Sanitization**: Escapes user search inputs to prevent Regular Expression Denial of Service attacks during username lookups.
+Vybe includes classic social features like creating posts, comments, likes, bookmarks, and real-time direct messaging, alongside AI-assisted features powered by Google Gemini (content moderation, image captioning, and semantic user recommendations via MongoDB Atlas Vector Search).
 
 ---
 
-## 🛠️ Tech Stack
+## Features
 
-### Frontend
-- **Framework**: React 19 + Vite
-- **Styling**: Tailwind CSS, Radix UI Primitives, Lucide Icons
-- **HTTP Client**: Axios (custom instance with `withCredentials: true` and 401 response interceptors)
-- **State & Routing**: React Context API (`AppContext`), React Router DOM v7
-- **Real-Time Client**: `socket.io-client`
-- **Path Aliasing**: `@/*` mapped to `./src/*`
-
-### Backend
-- **Runtime**: Node.js & Express 5
-- **Database**: MongoDB Atlas with Mongoose ODM
-- **Real-Time Engine**: Socket.IO Server
-- **AI Models**: Google Generative AI SDK (`text-embedding-004`, `gemini-2.0-flash`)
-- **Media & Uploads**: Cloudinary API, Multer, Sharp image processor
-- **Auth & Security**: JWT (`jsonwebtoken`), BcryptJS, Cookie Parser
+- **Post Feed**: Create posts with images and captions, with pagination and real-time like/comment updates.
+- **AI-Powered Recommendations**: Suggested users are ranked using MongoDB Atlas Vector Search (cosine similarity on 768-dimensional Gemini embeddings built from user bios and recent post captions), with automatic fallback to mutual connections and active user popularity.
+- **Direct Messaging**: 1-on-1 real-time chat via Socket.IO with multi-tab synchronization, online status indicators, cursor-based pagination, and support for editing, deleting, and forwarding messages.
+- **AI Assist Tools**: Automatic caption generation for images, accessibility alt-text generation, and safety moderation before posts are saved.
+- **Notifications**: Instant socket notifications for likes and comments, plus unread message alerts.
+- **Bookmarks & Likes**: Dedicated paginated pages for browsing saved and liked posts.
+- **Profile Management**: Profile pages with follower/following lists, connection counts, and editable bios and avatars.
 
 ---
 
-## 📂 Project Structure
+## Tech Stack
+
+- **Frontend**: React 19, Vite, Tailwind CSS, Radix UI primitives, Lucide React, Axios, Socket.IO Client
+- **Backend**: Node.js, Express 5, MongoDB Atlas (Mongoose 8), Socket.IO
+- **AI / Search**: Google Gemini API (`gemini-2.0-flash`, `gemini-embedding-001`), MongoDB Atlas Vector Search
+- **Media**: Sharp (server-side image optimization), Cloudinary
+- **Authentication**: JWT stored in `httpOnly` secure cookies, bcrypt password hashing
+
+---
+
+## Project Structure
 
 ```
 vybe/
 ├── backend/
-│   ├── controllers/         # Request handlers (user, post, message, notification)
-│   ├── middlewares/         # Authentication & security guards
-│   ├── models/              # Mongoose schemas (User, Post, Message, Conversation, Notification, Comment)
-│   ├── routes/              # Express API route declarations
-│   ├── socket/              # Socket.IO connection manager & presence map
-│   ├── utils/               # Gemini AI SDK helpers, Cloudinary config, Data URI transformers
-│   └── server.js            # Node.js server entry point
+│   ├── config/              # CORS allowed origins
+│   ├── controllers/         # Route logic (user, post, message, notification)
+│   ├── middlewares/         # Auth, multer, and validation guards
+│   ├── models/              # Mongoose schemas (User, Post, Message, Conversation, etc.)
+│   ├── routes/              # Express route declarations
+│   ├── services/            # Background embedding queue with rate-limiting
+│   ├── socket/              # Socket.IO handlers and online presence tracking
+│   └── utils/               # Gemini AI helpers, Cloudinary config, DB connection
 │
 └── frontend/
     ├── src/
-    │   ├── components/      # React UI components (ChatPage, MainLayout, Navbar, Post, etc.)
-    │   ├── context/         # AppContext (Global State, Socket lifecycle, Auth, Chat)
-    │   ├── lib/             # Axios instance, Tailwind merge utilities
-    │   ├── App.jsx          # Root application routing
-    │   └── main.jsx         # React DOM root entry point
-    ├── vite.config.js       # Vite bundler & @ path alias configuration
-    └── jsconfig.json        # VS Code IntelliSense path mapping
+    │   ├── components/      # React components (Feed, ChatPage, PostDetail, etc.)
+    │   ├── context/         # AppContext (auth, active chat, socket lifecycle)
+    │   ├── hooks/           # Custom data fetching and real-time hooks
+    │   └── lib/             # Axios instance and utilities
+    └── ...
 ```
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
-- **Node.js**: `v18+` or `v20+`
-- **MongoDB Atlas** database URI
-- **Cloudinary** account credentials
-- **Google Gemini API Key** *(optional; fallback algorithms included)*
 
----
+- Node.js (v18 or higher)
+- A MongoDB Atlas cluster (M0 free tier works)
+- A Cloudinary account for media hosting
+- A Google Gemini API key
 
-### Environment Setup
+### 1. Clone the repository
 
-Create a `.env` file in the root directory:
+```bash
+git clone https://github.com/Sahil26singh/vybe-.git
+cd vybe-
+```
+
+### 2. Install dependencies
+
+```bash
+# Install backend dependencies
+npm install
+
+# Install frontend dependencies
+cd frontend
+npm install
+cd ..
+```
+
+### 3. Setup environment variables
+
+Create a `.env` file in the project root:
 
 ```env
 PORT=8000
+NODE_ENV=development
+
+# Database
 MONGO_URI=mongodb+srv://<username>:<password>@cluster.mongodb.net/vybe
-SECRET_KEY=your_super_secret_jwt_key
+
+# Authentication
+SECRET_KEY=your_jwt_secret_key
+
+# Cloudinary
 CLOUD_NAME=your_cloudinary_cloud_name
 API_KEY=your_cloudinary_api_key
 API_SECRET=your_cloudinary_api_secret
+
+# Gemini AI & Vector Search
 GEMINI_API_KEY=your_gemini_api_key
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+VECTOR_INDEX_NAME=user_embedding_index
+
+# CORS
 ALLOWED_ORIGINS=http://localhost:5173,http://localhost:8000
-NODE_ENV=development
+```
+
+> **Note on Vector Search**: To enable Tier A vector recommendations, configure an Atlas Search index named `user_embedding_index` on the `users` collection (`embedding` field, 768 dimensions, cosine similarity). If the index is not configured, the app gracefully falls back to mutual connections and popular accounts.
+
+### 4. Run the application
+
+Start both the backend and frontend in development:
+
+```bash
+# Terminal 1: Backend
+npm run dev
+
+# Terminal 2: Frontend
+cd frontend
+npm run dev
+```
+
+The frontend will run at `http://localhost:5173` and the backend server at `http://localhost:8000`.
+
+To build for production:
+
+```bash
+npm run build
+npm start
 ```
 
 ---
 
-### Installation & Execution
+## API Overview
 
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/Sahil26singh/vybe-.git
-   cd vybe-
-   ```
+### Authentication & Users
+- `POST /api/v1/user/register` — Register a new account
+- `POST /api/v1/user/login` — Log in and set httpOnly JWT cookie
+- `POST /api/v1/user/logout` — Clear session cookie
+- `GET /api/v1/user/suggested` — Suggested users (Vector Search -> Mutuals -> Popular)
+- `GET /api/v1/user/profile/:id` — Get user profile by ID
+- `POST /api/v1/user/profile/edit` — Edit bio, gender, and avatar
+- `POST /api/v1/user/followorunfollow/:id` — Follow or unfollow a user
+- `GET /api/v1/user/:id/followers` — List user's followers
+- `GET /api/v1/user/:id/following` — List user's following
 
-2. **Install Server & Client Dependencies**:
-   ```bash
-   # Install backend dependencies
-   npm install
+### Posts
+- `GET /api/v1/post/all` — Paginated home feed posts
+- `GET /api/v1/post/:id` — Get single post by ID
+- `POST /api/v1/post/addpost` — Create new post with image upload
+- `POST /api/v1/post/generate-caption` — Generate AI caption from image preview
+- `POST /api/v1/post/:id/like` — Like a post
+- `POST /api/v1/post/:id/dislike` — Remove like
+- `POST /api/v1/post/:id/bookmark` — Bookmark or un-bookmark post
+- `GET /api/v1/post/liked` — Paginated list of posts liked by current user
+- `GET /api/v1/post/bookmarked` — Paginated list of posts saved by current user
+- `DELETE /api/v1/post/delete/:id` — Delete a post (author only)
+- `POST /api/v1/post/:id/comment` — Add a comment
+- `GET /api/v1/post/:id/comments` — Get comments for a post
+- `DELETE /api/v1/post/:postId/comment/:commentId` — Delete a comment
 
-   # Install frontend dependencies
-   cd frontend
-   npm install
-   cd ..
-   ```
+### Direct Messages
+- `POST /api/v1/message/send/:id` — Send a direct message
+- `GET /api/v1/message/all/:id` — Fetch chat history (supports pagination and `?before=<id>`)
+- `PUT /api/v1/message/edit/:id` — Edit a sent message
+- `DELETE /api/v1/message/delete/:id` — Delete a sent message
+- `POST /api/v1/message/forward/:id` — Forward a message to another user
 
-3. **Run in Development Mode**:
-   ```bash
-   # Terminal 1: Start Backend Server (Port 8000)
-   npm run dev
-
-   # Terminal 2: Start Frontend Dev Server (Port 5173)
-   cd frontend
-   npm run dev
-   ```
-
-4. **Build & Run Production Mode**:
-   ```bash
-   # Build frontend assets into backend/public
-   npm run build
-
-   # Start production server
-   npm start
-   ```
-
----
-
-## 📡 API Reference Overview
-
-| Domain | Method | Endpoint | Description |
-| :--- | :--- | :--- | :--- |
-| **Auth** | `POST` | `/api/v1/user/register` | Create a new user account |
-| **Auth** | `POST` | `/api/v1/user/login` | Log in & set HTTP-only JWT cookie |
-| **Auth** | `GET` | `/api/v1/user/logout` | Clear session cookie |
-| **User** | `GET` | `/api/v1/user/suggested` | Vector search similarity recommendation |
-| **User** | `POST` | `/api/v1/user/profile/edit` | Update bio, gender, & profile picture |
-| **Posts** | `POST` | `/api/v1/post/addpost` | Upload post with image & optional caption |
-| **Posts** | `POST` | `/api/v1/post/generate-caption` | Generate AI caption from image buffer |
-| **Posts** | `GET` | `/api/v1/post/all` | Fetch feed posts sorted by newest |
-| **Posts** | `GET` | `/api/v1/post/:id/like` | Like a post |
-| **Posts** | `GET` | `/api/v1/post/:id/dislike` | Dislike / remove like from a post |
-| **Messages**| `POST` | `/api/v1/message/send/:id` | Send direct message |
-| **Messages**| `GET` | `/api/v1/message/all/:id` | Get message history with user |
-| **Messages**| `POST` | `/api/v1/message/forward/:id`| Forward message to another user |
-| **Notifs** | `GET` | `/api/v1/notification` | Fetch user notifications & unread count |
+### Notifications
+- `GET /api/v1/notification` — Get user notifications (likes, comments)
+- `GET /api/v1/notification/unread-count` — Get count of unread notifications
 
 ---
 
-## 📜 License
+## License
 
-Distributed under the MIT License. Built by [Sahil Singh](https://github.com/Sahil26singh).
+MIT License. Built by [Sahil Singh](https://github.com/Sahil26singh).

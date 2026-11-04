@@ -31,7 +31,7 @@ export default function PostDetail() {
 
   const isBookmarked = (user?.bookmarks || []).map(idStr).includes(idStr(post?._id));
 
-  // Load from global posts cache first, then fetch if not found
+  // Load from global posts cache first, then fetch directly by ID if not found
   useEffect(() => {
     const cached = posts.find((p) => idStr(p._id) === idStr(id));
     if (cached) {
@@ -42,11 +42,10 @@ export default function PostDetail() {
       setLoading(false);
     } else {
       let isCurrent = true;
-      api.get('/api/v1/post/all')
+      api.get(`/api/v1/post/${id}`)
         .then((res) => {
           if (!isCurrent) return;
-          const all = Array.isArray(res.data?.posts) ? res.data.posts : [];
-          const found = all.find((p) => idStr(p._id) === idStr(id));
+          const found = res.data?.post;
           if (found) {
             setPost(found);
             setComments(found.comments || []);

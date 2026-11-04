@@ -22,7 +22,7 @@ import logo from '../assets/logo.png';
 const LeftSidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, setAuthUser, setSelectedPost, setPosts, unreadNotifCount } = useApp();
+  const { user, setAuthUser, setSelectedPost, setPosts, unreadNotifCount, unreadChatCount, setUnreadChatCount } = useApp();
 
   const [manualActive, setManualActive] = useState(null);
   const [open, setOpen] = useState(false);
@@ -68,6 +68,7 @@ const LeftSidebar = () => {
     } else if (textType === "Home") {
       navigate("/");
     } else if (textType === "Messages") {
+      if (typeof setUnreadChatCount === "function") setUnreadChatCount(0);
       navigate("/chat");
     } else if (textType === "Bookmarks") {
       navigate("/bookmarks");
@@ -186,6 +187,7 @@ const LeftSidebar = () => {
             const bg = active ? "bg-gray-100" : "";
             const isConnections = item.text === "Connections";
             const isNotif = item.text === "Notifications";
+            const isMessages = item.text === "Messages";
 
             if (isConnections) {
               return (
@@ -257,6 +259,13 @@ const LeftSidebar = () => {
                 {isNotif && unreadNotifCount > 0 && (
                   <span className="absolute right-4 top-3 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold text-white bg-red-600 rounded-full">
                     {unreadNotifCount > 99 ? "99+" : unreadNotifCount}
+                  </span>
+                )}
+
+                {/* Messages badge */}
+                {isMessages && unreadChatCount > 0 && (
+                  <span className="absolute right-4 top-3 inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-bold text-white bg-blue-600 rounded-full">
+                    {unreadChatCount > 99 ? "99+" : unreadChatCount}
                   </span>
                 )}
               </div>

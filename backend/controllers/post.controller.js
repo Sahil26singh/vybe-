@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import sharp from "sharp";
 import cloudinary from "../utils/cloudinary.js";
 import { Post } from "../models/post.model.js";
@@ -171,10 +172,14 @@ export const likePost = async (req, res) => {
     const post = await Post.findById(postId);
     if (!post) return res.status(404).json({ message: "Post not found", success: false });
 
+    const userObjId = mongoose.isValidObjectId(likeKrneWalaUserKiId)
+      ? new mongoose.Types.ObjectId(String(likeKrneWalaUserKiId))
+      : likeKrneWalaUserKiId;
+
     // Only update if not already liked
     const updateResult = await Post.updateOne(
-      { _id: postId, likes: { $ne: likeKrneWalaUserKiId } },
-      { $addToSet: { likes: likeKrneWalaUserKiId } }
+      { _id: postId, likes: { $nin: [userObjId, String(likeKrneWalaUserKiId)] } },
+      { $addToSet: { likes: userObjId } }
     );
 
     // Only notify if the update actually added a new like
@@ -221,7 +226,10 @@ export const dislikePost = async (req, res) => {
     if (!post) return res.status(404).json({ message: "Post not found", success: false });
 
     // remove the like
-    await Post.findByIdAndUpdate(postId, { $pull: { likes: userId } });
+    const userObjId = mongoose.isValidObjectId(userId) ? new mongoose.Types.ObjectId(String(userId)) : userId;
+    await Post.findByIdAndUpdate(postId, {
+      $pull: { likes: { $in: [userObjId, String(userId)] } }
+    });
 
     try {
       const postOwnerId = String(post.author);
@@ -383,12 +391,16 @@ export const bookmarkPost = async (req, res) => {
         const user = await User.findById(authorId);
         if (!user) return res.status(404).json({ message: 'User not found', success: false });
 
+        const postObjId = mongoose.isValidObjectId(postId) ? new mongoose.Types.ObjectId(String(postId)) : postId;
         const isAlreadyBookmarked = (user.bookmarks || []).some(id => String(id) === String(postId));
 
         if (isAlreadyBookmarked) {
             // already bookmarked -> remove from the bookmark
-            await User.updateOne({ _id: authorId }, { $pull: { bookmarks: postId } });
-            const updatedUser = await User.findById(authorId).select("-password -embedding -embeddingSource");
+            await User.updateOne(
+                { _id: authorId },
+                { $pull: { bookmarks: { $in: [postObjId, String(postId)] } } }
+            );
+            const updatedUser = await User.findById(authorId).select("-password -embedding -embeddingModel -embeddingStatus -embeddingAttempts");
             return res.status(200).json({
                 type: 'unsaved',
                 message: 'Post removed from bookmark',
@@ -397,8 +409,11 @@ export const bookmarkPost = async (req, res) => {
             });
         } else {
             // add to bookmarks
-            await User.updateOne({ _id: authorId }, { $addToSet: { bookmarks: postId } });
-            const updatedUser = await User.findById(authorId).select("-password -embedding -embeddingSource");
+            await User.updateOne(
+                { _id: authorId },
+                { $addToSet: { bookmarks: postObjId } }
+            );
+            const updatedUser = await User.findById(authorId).select("-password -embedding -embeddingModel -embeddingStatus -embeddingAttempts");
             return res.status(200).json({
                 type: 'saved',
                 message: 'Post bookmarked',
@@ -429,4 +444,84 @@ export const generateCaption = async (req, res) => {
     console.error("generateCaption error:", error);
     return res.status(500).json({ success: false, message: "Couldn't generate a caption" });
   }
+};
+
+export const getPostById = async (req, res) => {
+    try {
+        const postId = req.params.id;
+        const post = await Post.findById(postId)
+            .populate({ path: 'author', select: 'username profilePicture' });
+        if (!post) {
+            return res.status(404).json({ success: false, message: "Post not found" });
+        }
+        return res.status(200).json({ success: true, post });
+    } catch (error) {
+        console.error("getPostById error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+};
+
+export const getLikedPosts = async (req, res) => {
+    try {
+        const userId = req.id;
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+        const skip = (page - 1) * limit;
+
+        const [posts, totalPosts] = await Promise.all([
+            Post.find({ likes: userId })
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .populate({ path: 'author', select: 'username profilePicture' }),
+            Post.countDocuments({ likes: userId })
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            posts,
+            page,
+            limit,
+            totalPosts,
+            totalPages: Math.ceil(totalPosts / limit),
+            hasMore: skip + posts.length < totalPosts
+        });
+    } catch (error) {
+        console.error("getLikedPosts error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
+};
+
+export const getBookmarkedPosts = async (req, res) => {
+    try {
+        const userId = req.id;
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+        const skip = (page - 1) * limit;
+
+        const user = await User.findById(userId).select("bookmarks");
+        const bookmarks = user?.bookmarks || [];
+
+        const [posts, totalPosts] = await Promise.all([
+            Post.find({ _id: { $in: bookmarks } })
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .populate({ path: 'author', select: 'username profilePicture' }),
+            Post.countDocuments({ _id: { $in: bookmarks } })
+        ]);
+
+        return res.status(200).json({
+            success: true,
+            posts,
+            page,
+            limit,
+            totalPosts,
+            totalPages: Math.ceil(totalPosts / limit),
+            hasMore: skip + posts.length < totalPosts
+        });
+    } catch (error) {
+        console.error("getBookmarkedPosts error:", error);
+        return res.status(500).json({ success: false, message: "Internal server error" });
+    }
 };

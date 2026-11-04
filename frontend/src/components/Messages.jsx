@@ -11,7 +11,7 @@ import { toast } from "sonner";
 
 const MESSAGE_API = "/api/v1/message";
 
-const idStr = (v) => (v == null ? "" : String(v));
+const idStr = (v) => (v == null ? "" : (typeof v === "object" && v._id ? String(v._id) : String(v)));
 const safe = (v, fallback = "") => (v == null ? fallback : v);
 
 function tryParse(jsonLike) {

@@ -45,7 +45,7 @@ export const buildProfileText = async (user) => {
 /**
  * Internal worker to process embedding with up to 3 attempts and exponential backoff
  */
-const processUserEmbedding = async (userId) => {
+export const processUserEmbedding = async (userId) => {
   const user = await User.findById(userId).select("+embedding");
   if (!user) return;
 

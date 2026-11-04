@@ -7,10 +7,10 @@ export const validateBody = (schema) => {
   return (req, res, next) => {
     const result = schema.safeParse(req.body);
     if (!result.success) {
-      const firstError = result.error.errors[0]?.message || "Validation failed";
+      const firstError = result.error.issues?.[0]?.message || "Validation failed";
       return res.status(400).json({
         message: firstError,
-        errors: result.error.errors,
+        errors: result.error.issues || [],
         success: false,
       });
     }
@@ -22,7 +22,7 @@ export const validateBody = (schema) => {
 
 export const addCommentSchema = z.object({
   text: z
-    .string({ required_error: "text is required" })
+    .string({ error: "text is required" })
     .trim()
     .min(1, "text is required")
     .max(1000, "Comment cannot exceed 1000 characters"),

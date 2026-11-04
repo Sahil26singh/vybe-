@@ -24,24 +24,32 @@ export const sendMessage = async (req, res) => {
     }
 
     const trimmedMessage = message.trim();
+    const sortedParticipants = [String(senderId), String(receiverId)].sort();
+    const participantsKey = sortedParticipants.join(":");
 
-    // find or create conversation (upsert prevents duplicate simultaneous conversations)
+    // find or create conversation (upsert on participantsKey prevents duplicate simultaneous conversations)
     let conversation = await Conversation.findOne({
-      participants: { $all: [senderId, receiverId] }
+      $or: [
+        { participantsKey },
+        { participants: { $all: [senderId, receiverId] } }
+      ]
     });
 
     if (!conversation) {
-      const sortedParticipants = [String(senderId), String(receiverId)].sort();
       conversation = await Conversation.findOneAndUpdate(
-        { participants: sortedParticipants },
+        { participantsKey },
         {
           $setOnInsert: {
             participants: sortedParticipants,
+            participantsKey,
             messages: []
           }
         },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
+    } else if (!conversation.participantsKey) {
+      conversation.participantsKey = participantsKey;
+      await conversation.save().catch(() => {});
     }
 
     // create message
@@ -54,10 +62,15 @@ export const sendMessage = async (req, res) => {
     // push message id into conversation atomically
     await Conversation.findByIdAndUpdate(conversation._id, { $push: { messages: newMessage._id } });
 
-    // emit realtime newMessage to receiver if online (no persistent Notification row saved)
+    // emit realtime newMessage to both sender (other tabs) and receiver
     try {
       if (typeof io !== "undefined" && io) {
-        io.to(String(receiverId)).emit("newMessage", newMessage);
+        const senderUser = await User.findById(senderId).select("username profilePicture");
+        const messagePayload = {
+          ...newMessage.toObject(),
+          senderUsername: senderUser?.username || ""
+        };
+        io.to(String(senderId)).to(String(receiverId)).emit("newMessage", messagePayload);
       }
     } catch (emitErr) {
       console.error("emit newMessage error:", emitErr);
@@ -79,8 +92,14 @@ export const getMessage = async (req, res) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
     const before = req.query.before;
 
+    const sortedParticipants = [String(senderId), String(receiverId)].sort();
+    const participantsKey = sortedParticipants.join(":");
+
     const conversation = await Conversation.findOne({
-      participants: { $all: [senderId, receiverId] }
+      $or: [
+        { participantsKey },
+        { participants: { $all: [senderId, receiverId] } }
+      ]
     });
     if (!conversation) {
       return res.status(200).json({ success: true, messages: [], totalMessages: 0, hasMore: false });
@@ -148,10 +167,10 @@ export const editMessage = async (req, res) => {
     msg.message = text.trim();
     await msg.save();
 
-    // Emit realtime update to receiver
+    // Emit realtime update to both sender (other tabs) and receiver
     try {
       if (typeof io !== "undefined" && io) {
-        io.to(String(msg.receiverId)).emit("messageEdited", msg);
+        io.to(String(userId)).to(String(msg.receiverId)).emit("messageEdited", msg);
       }
     } catch (err) {
       console.error("emit messageEdited error:", err);
@@ -181,10 +200,10 @@ export const deleteMessage = async (req, res) => {
     await Conversation.updateMany({ messages: messageId }, { $pull: { messages: messageId } });
     await Message.deleteOne({ _id: messageId });
 
-    // Emit realtime deletion to receiver
+    // Emit realtime deletion to both sender (other tabs) and receiver
     try {
       if (typeof io !== "undefined" && io) {
-        io.to(String(receiverId)).emit("messageDeleted", { messageId });
+        io.to(String(userId)).to(String(receiverId)).emit("messageDeleted", { messageId });
       }
     } catch (err) {
       console.error("emit messageDeleted error:", err);
@@ -212,22 +231,31 @@ export const forwardMessage = async (req, res) => {
     });
     if (!original) return res.status(404).json({ success: false, message: "Original message not found" });
 
-    // find or create conversation between sender and toUserId (upsert prevents duplicate simultaneous creations)
+    // find or create conversation between sender and toUserId (upsert on participantsKey prevents duplicate simultaneous creations)
+    const sortedParticipants = [String(senderId), String(toUserId)].sort();
+    const participantsKey = sortedParticipants.join(":");
+
     let conversation = await Conversation.findOne({
-      participants: { $all: [senderId, toUserId] }
+      $or: [
+        { participantsKey },
+        { participants: { $all: [senderId, toUserId] } }
+      ]
     });
     if (!conversation) {
-      const sortedParticipants = [String(senderId), String(toUserId)].sort();
       conversation = await Conversation.findOneAndUpdate(
-        { participants: sortedParticipants },
+        { participantsKey },
         {
           $setOnInsert: {
             participants: sortedParticipants,
+            participantsKey,
             messages: []
           }
         },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
+    } else if (!conversation.participantsKey) {
+      conversation.participantsKey = participantsKey;
+      await conversation.save().catch(() => {});
     }
 
     // Create a new message with same text
@@ -238,10 +266,15 @@ export const forwardMessage = async (req, res) => {
     });
     await Conversation.findByIdAndUpdate(conversation._id, { $push: { messages: newMsg._id } });
 
-    // Realtime emit to receiver if online
+    // Realtime emit to both sender (other tabs) and receiver if online
     try {
       if (typeof io !== "undefined" && io) {
-        io.to(String(toUserId)).emit("newMessage", newMsg);
+        const senderUser = await User.findById(senderId).select("username profilePicture");
+        const forwardPayload = {
+          ...newMsg.toObject(),
+          senderUsername: senderUser?.username || ""
+        };
+        io.to(String(senderId)).to(String(toUserId)).emit("newMessage", forwardPayload);
       }
     } catch (err) {
       console.error("emit forward newMessage error:", err);

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
-import { Dialog, DialogContent, DialogTrigger } from "./ui/dialog";
+import { Dialog, DialogContent, DialogTrigger, DialogTitle, DialogDescription, DialogHeader } from "./ui/dialog";
 import { Bookmark, MessageCircle, MoreHorizontal, Send, BookmarkCheck } from "lucide-react";
 import { Button } from "./ui/button";
 import { FaHeart, FaRegHeart } from "react-icons/fa";
@@ -11,7 +11,12 @@ import { toast } from "sonner";
 import { Badge } from "./ui/badge";
 import { useNavigate } from "react-router-dom";
 
-const idStr = (x) => (typeof x === "string" ? x : String(x?.toString?.() ?? x));
+const idStr = (x) => {
+  if (!x) return "";
+  if (typeof x === "string") return x;
+  if (typeof x === "object" && x._id) return String(x._id);
+  return String(x?.toString?.() ?? x);
+};
 const hasId = (list, id) => Array.isArray(list) && list.map(idStr).includes(idStr(id));
 
 const Post = ({ post }) => {
@@ -31,8 +36,8 @@ const Post = ({ post }) => {
 
   const { user, posts, setPosts, setSelectedPost, setAuthUser } = useApp();
 
-  const [liked, setLiked] = useState(hasId(post.likes, user?._id));
-  const [postLike, setPostLike] = useState(Array.isArray(post.likes) ? post.likes.length : 0);
+  const [liked, setLiked] = useState(() => hasId(post.likes, user?._id));
+  const [postLike, setPostLike] = useState(() => (Array.isArray(post.likes) ? post.likes.length : 0));
 
   const [bookmarkInFlight, setBookmarkInFlight] = useState(false);
 
@@ -42,36 +47,41 @@ const Post = ({ post }) => {
   };
 
   const likeOrDislikeHandler = async () => {
-    try {
-      const action = liked ? "dislike" : "like";
+    if (!user?._id) {
+      toast.error("Please login to like posts");
+      return;
+    }
+    const wasLiked = liked;
+    const nextLiked = !wasLiked;
+    const nextCount = nextLiked ? postLike + 1 : Math.max(0, postLike - 1);
 
+    // Immediate local optimistic state update
+    setLiked(nextLiked);
+    setPostLike(nextCount);
+
+    // Sync global feed if this post is present
+    if (posts && posts.some((p) => idStr(p._id) === idStr(post._id))) {
       const updatedPosts = posts.map((p) =>
         idStr(p._id) === idStr(post._id)
           ? {
               ...p,
-              likes: liked
-                ? (p.likes || []).filter((id) => idStr(id) !== idStr(user._id))
-                : [ ...(p.likes || []), user._id ],
-            }
-          : p
-      );
-      setPosts(updatedPosts);
-      toast.success(liked ? "Post disliked" : "Post liked");
-
-      await api.post(`/api/v1/post/${post._id}/${action}`, {});
-    } catch (error) {
-      const reverted = posts.map((p) =>
-        idStr(p._id) === idStr(post._id)
-          ? {
-              ...p,
-              likes: liked
-                ? [ ...(p.likes || []), user._id ]
+              likes: nextLiked
+                ? [...(p.likes || []).filter((id) => idStr(id) !== idStr(user._id)), user._id]
                 : (p.likes || []).filter((id) => idStr(id) !== idStr(user._id)),
             }
           : p
       );
-      setPosts(reverted);
-      toast.error("Something went wrong while liking the post");
+      setPosts(updatedPosts);
+    }
+
+    try {
+      const action = wasLiked ? "dislike" : "like";
+      toast.success(nextLiked ? "Post liked" : "Post disliked");
+      await api.post(`/api/v1/post/${post._id}/${action}`, {});
+    } catch (error) {
+      setLiked(wasLiked);
+      setPostLike(postLike);
+      toast.error("Something went wrong while updating like");
       console.error(error);
     }
   };
@@ -122,7 +132,6 @@ const Post = ({ post }) => {
 
     const wasBookmarked = bookmarked;
     const prevUser = user;
-    const prevPosts = posts;
 
     const prevList = Array.isArray(user?.bookmarks) ? user.bookmarks : [];
     const nextBookmarks = wasBookmarked
@@ -131,10 +140,12 @@ const Post = ({ post }) => {
 
     setAuthUser({ ...user, bookmarks: nextBookmarks });
 
-    const nextPosts = posts.map((p) =>
-      idStr(p._id) === idStr(post._id) ? { ...p, bookmarkedByMe: !wasBookmarked } : p
-    );
-    setPosts(nextPosts);
+    if (posts && posts.some((p) => idStr(p._id) === idStr(post._id))) {
+      const nextPosts = posts.map((p) =>
+        idStr(p._id) === idStr(post._id) ? { ...p, bookmarkedByMe: !wasBookmarked } : p
+      );
+      setPosts(nextPosts);
+    }
 
     try {
       const res = await api.post(`/api/v1/post/${post?._id}/bookmark`, {});
@@ -153,7 +164,6 @@ const Post = ({ post }) => {
       }
     } catch (err) {
       setAuthUser(prevUser);
-      setPosts(prevPosts);
       toast.error("Could not update bookmark");
       console.error(err);
     } finally {
@@ -162,12 +172,14 @@ const Post = ({ post }) => {
   };
 
   useEffect(() => {
-    if (!post || !user) return;
-    const currentPost = posts?.find((p) => idStr(p._id) === idStr(post._id)) || post;
-    const likesArr = Array.isArray(currentPost.likes) ? currentPost.likes : [];
-    setPostLike(likesArr.length);
-    setLiked(hasId(likesArr, user._id));
-  }, [posts, post, user]);
+    if (!user?._id || !post?._id) return;
+    const foundInPosts = posts?.find((p) => idStr(p._id) === idStr(post._id));
+    if (foundInPosts) {
+      const likesArr = Array.isArray(foundInPosts.likes) ? foundInPosts.likes : [];
+      setPostLike(likesArr.length);
+      setLiked(hasId(likesArr, user._id));
+    }
+  }, [posts, user?._id, post._id]);
 
   const [connections, setConnections] = useState([]);
 
@@ -267,6 +279,8 @@ const Post = ({ post }) => {
             <MoreHorizontal className="cursor-pointer" />
           </DialogTrigger>
           <DialogContent className="flex flex-col items-center text-sm text-center">
+            <DialogTitle className="sr-only">Post Actions</DialogTitle>
+            <DialogDescription className="sr-only">Post options menu.</DialogDescription>
             {idStr(user?._id) !== idStr(post?.author?._id) && (
               <Button variant="ghost" className="cursor-pointer w-full text-[#ED4956] font-bold">
                 Unfollow
@@ -355,7 +369,10 @@ const Post = ({ post }) => {
       {/* Share Dialog */}
       <Dialog open={shareOpen} onOpenChange={setShareOpen}>
         <DialogContent className="sm:max-w-md">
-          <h2 className="text-lg font-semibold text-center border-b pb-2">Share Post</h2>
+          <DialogHeader className="border-b pb-2">
+            <DialogTitle className="text-lg font-semibold text-center">Share Post</DialogTitle>
+            <DialogDescription className="sr-only">Send this post directly to a user.</DialogDescription>
+          </DialogHeader>
           <div className="py-2">
             <input
               type="text"
