@@ -9,11 +9,7 @@ const conversationSchema = new mongoose.Schema({
         type: String,
         trim: true,
         default: null
-    },
-    messages: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Message'
-    }]
+    }
 }, { timestamps: true });
 
 conversationSchema.index({ participants: 1 });

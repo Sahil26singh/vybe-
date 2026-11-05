@@ -25,7 +25,7 @@ const CommentDialog = ({ open, setOpen }) => {
       setComment([]);
     }
 
-    api.get(`/api/v1/post/${selectedPost._id}/comment/all`)
+    api.get(`/api/v1/post/${selectedPost._id}/comments`)
       .then((res) => {
         if (isCurrent && res.data?.success && Array.isArray(res.data.comments)) {
           setComment(res.data.comments);

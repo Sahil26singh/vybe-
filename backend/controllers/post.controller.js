@@ -6,9 +6,9 @@ import { User } from "../models/user.model.js";
 import { Comment } from "../models/comment.model.js";
 import { io } from "../socket/socket.js";
 import { Notification } from "../models/notification.model.js";
-import { generateAltText, generateAICaption, moderateContent } from "../utils/gemini.js";
+import { generateAltText, generateAICaption, moderateContent, moderateText } from "../utils/gemini.js";
 import { queueEmbedding } from "../services/embedding.service.js";
-import { invalidateSuggestedUsersCache } from "./user.controller.js";
+import { invalidateSuggestedUsersCache } from "../utils/cache.js";
 
 // DELETE a comment 
 export const deleteComment = async (req, res) => {
@@ -92,6 +92,7 @@ export const addNewPost = async (req, res) => {
         const post = await Post.create({
             caption,
             image: cloudResponse.secure_url,
+            imagePublicId: cloudResponse.public_id,
             altText,
             author: authorId
         });
@@ -101,7 +102,7 @@ export const addNewPost = async (req, res) => {
             await user.save();
             // Queue author profile embedding update in background with new post caption
             queueEmbedding(authorId);
-            invalidateSuggestedUsersCache();
+            invalidateSuggestedUsersCache(authorId);
         }
 
         await post.populate({ path: 'author', select: '-password -embedding -embeddingModel -embeddingStatus -embeddingAttempts' });
@@ -189,26 +190,37 @@ export const likePost = async (req, res) => {
       const postOwnerId = String(post.author?._id || post.author);
       // only notify if liker is not the post owner
       if (postOwnerId !== String(likeKrneWalaUserKiId)) {
-        const user = await User.findById(likeKrneWalaUserKiId).select("username profilePicture");
-        const notif = await Notification.create({
+        // Prevent duplicate notifications on rapid like/unlike
+        const existingNotif = await Notification.findOne({
           to: postOwnerId,
           from: likeKrneWalaUserKiId,
           type: "like",
-          data: { postId: post._id, likerId: likeKrneWalaUserKiId, likerUsername: user?.username || "" }
+          "data.postId": post._id
         });
 
-        try {
-          if (io) {
-            io.to(String(postOwnerId)).emit("newNotification", {
-              _id: notif._id,
-              from: { _id: likeKrneWalaUserKiId, username: user?.username || "" },
-              type: notif.type,
-              data: notif.data,
-              createdAt: notif.createdAt
-            });
+        let notif = existingNotif;
+        if (!existingNotif) {
+          const user = await User.findById(likeKrneWalaUserKiId).select("username profilePicture");
+          notif = await Notification.create({
+            to: postOwnerId,
+            from: likeKrneWalaUserKiId,
+            type: "like",
+            data: { postId: post._id, likerId: likeKrneWalaUserKiId, likerUsername: user?.username || "" }
+          });
+
+          try {
+            if (io) {
+              io.to(String(postOwnerId)).emit("newNotification", {
+                _id: notif._id,
+                from: { _id: likeKrneWalaUserKiId, username: user?.username || "" },
+                type: notif.type,
+                data: notif.data,
+                createdAt: notif.createdAt
+              });
+            }
+          } catch (emitErr) {
+            console.error("emit newNotification (like) error:", emitErr);
           }
-        } catch (emitErr) {
-          console.error("emit newNotification (like) error:", emitErr);
         }
       }
     }
@@ -233,8 +245,17 @@ export const dislikePost = async (req, res) => {
       $pull: { likes: { $in: [userObjId, String(userId)] } }
     });
 
+    const postOwnerId = String(post.author?._id || post.author);
+
+    // Delete like notification on unlike
+    await Notification.findOneAndDelete({
+      to: postOwnerId,
+      from: userId,
+      type: "like",
+      "data.postId": post._id
+    });
+
     try {
-      const postOwnerId = String(post.author);
       if (postOwnerId !== String(userId)) {
         if (io) {
           io.to(postOwnerId).emit("postLikeRemoved", { postId, userId });
@@ -258,6 +279,15 @@ export const addComment = async (req,res) =>{
 
         const {text} = req.body;
         if(!text || !text.trim()) return res.status(400).json({message:'text is required', success:false});
+
+        // Moderate comment text for severe policy violations
+        const commentModeration = await moderateText(text);
+        if (!commentModeration.safe) {
+            return res.status(400).json({
+                message: commentModeration.reason || "Comment violates content policy.",
+                success: false
+            });
+        }
 
         const post = await Post.findById(postId);
         if(!post) return res.status(404).json({message:'Post not found', success:false});
@@ -339,7 +369,14 @@ export const deletePost = async (req,res) => {
         if(post.author.toString() !== authorId) return res.status(403).json({message:'Unauthorized'});
 
         // 1. Delete the image from Cloudinary
-        if (post.image) {
+        if (post.imagePublicId) {
+            try {
+                await cloudinary.uploader.destroy(post.imagePublicId);
+            } catch (cloudErr) {
+                console.error("Cloudinary delete image error:", cloudErr);
+            }
+        } else if (post.image) {
+            // Fallback for legacy posts without imagePublicId
             try {
                 const parts = post.image.split('/');
                 const uploadIndex = parts.indexOf('upload');
@@ -356,7 +393,7 @@ export const deletePost = async (req,res) => {
                     if (publicId) await cloudinary.uploader.destroy(publicId);
                 }
             } catch (cloudErr) {
-                console.error("Cloudinary delete image error:", cloudErr);
+                console.error("Cloudinary delete image fallback error:", cloudErr);
             }
         }
 
@@ -367,14 +404,17 @@ export const deletePost = async (req,res) => {
         await User.updateOne({ _id: authorId }, { $pull: { posts: postId } });
 
         // 4. Delete associated comments
-        await Comment.deleteMany({post:postId});
+        await Comment.deleteMany({ post: postId });
 
-        // 5. Delete post
+        // 5. Delete related notifications for this post
+        await Notification.deleteMany({ "data.postId": postId });
+
+        // 6. Delete post
         await Post.findByIdAndDelete(postId);
 
-        // Update author profile embedding and invalidate suggested users cache
+        // Update author profile embedding and invalidate suggested users cache for author
         queueEmbedding(authorId);
-        invalidateSuggestedUsersCache();
+        invalidateSuggestedUsersCache(authorId);
 
         return res.status(200).json({
             success:true,

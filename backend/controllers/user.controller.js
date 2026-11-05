@@ -8,18 +8,8 @@ import { Post } from "../models/post.model.js";
 import { Notification } from "../models/notification.model.js";
 import { io } from "../socket/socket.js";
 import { queueEmbedding } from "../services/embedding.service.js";
-import { usernameCache } from "../utils/cache.js";
-
-// In-memory 5-minute cache for suggested users: userId -> { users, source, expiresAt }
-const suggestionsCache = new Map();
-
-export function invalidateSuggestedUsersCache(userId) {
-  if (userId) {
-    suggestionsCache.delete(String(userId));
-  } else {
-    suggestionsCache.clear();
-  }
-}
+import { usernameCache, suggestionsCache, invalidateSuggestedUsersCache } from "../utils/cache.js";
+import { moderateText, moderateImage } from "../utils/gemini.js";
 
 // Return followers list populated with minimal fields
 export const getFollowers = async (req, res) => {
@@ -90,12 +80,17 @@ export const getFollowing = async (req, res) => {
 export const searchUsersByUsername = async (req, res) => {
   try {
     const raw = (req.query.query || "").trim().toLowerCase();
-    if (!raw) {
-      const allUsers = await User.find({ _id: { $ne: req.id } })
-        .select("_id username profilePicture bio")
-        .limit(50)
-        .lean();
-      return res.json({ success: true, results: allUsers, suggestions: [] });
+    // Prevent user enumeration: require minimum 2 characters; never dump all users on empty query
+    if (!raw || raw.length < 2) {
+      return res.json({ success: true, results: [], suggestions: [] });
+    }
+
+    if (raw.length > 30) {
+      return res.status(400).json({ success: false, message: "Search query cannot exceed 30 characters" });
+    }
+
+    if (!/^[a-zA-Z0-9_.]+$/.test(raw)) {
+      return res.status(400).json({ success: false, message: "Search query contains invalid characters" });
     }
 
     const safe = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -138,6 +133,21 @@ export const register = async (req, res) => {
         if (!username || !email || !password) {
             return res.status(400).json({
                 message: "Username, email, and password are required.",
+                success: false,
+            });
+        }
+
+        if (username.length < 3 || username.length > 30) {
+            return res.status(400).json({
+                message: "Username must be between 3 and 30 characters long.",
+                success: false,
+            });
+        }
+
+        const usernameRegex = /^[a-zA-Z0-9_.]+$/;
+        if (!usernameRegex.test(username)) {
+            return res.status(400).json({
+                message: "Username can only contain letters, numbers, periods, and underscores.",
                 success: false,
             });
         }
@@ -363,7 +373,28 @@ export const editProfile = async (req, res) => {
         const profilePicture = req.file;
         let cloudResponse;
 
+        // Moderate bio if provided
+        if (bio !== undefined && typeof bio === "string" && bio.trim()) {
+            const bioModeration = await moderateText(bio);
+            if (!bioModeration.safe) {
+                return res.status(400).json({
+                    success: false,
+                    message: bioModeration.reason || "Bio violates community content policy."
+                });
+            }
+        }
+
+        // Moderate profile picture if uploaded
         if (profilePicture) {
+            if (profilePicture.buffer) {
+                const imageModeration = await moderateImage(profilePicture.buffer);
+                if (!imageModeration.safe) {
+                    return res.status(400).json({
+                        success: false,
+                        message: imageModeration.reason || "Profile picture violates community content policy."
+                    });
+                }
+            }
             const fileUri = getDataUri(profilePicture);
             cloudResponse = await cloudinary.uploader.upload(fileUri);
         }
@@ -375,17 +406,17 @@ export const editProfile = async (req, res) => {
                 success: false
             });
         }
-        if (bio !== undefined) user.bio = bio;
-        if (gender !== undefined) user.gender = gender;
-        if (profilePicture) user.profilePicture = cloudResponse.secure_url;
+        if (bio !== undefined) user.bio = String(bio || "").trim();
+        if (gender !== undefined) user.gender = String(gender || "").trim();
+        if (profilePicture && cloudResponse?.secure_url) user.profilePicture = cloudResponse.secure_url;
 
         await user.save();
 
         // Invalidate username cache
         usernameCache.delete(String(userId));
 
-        // Invalidate suggestions cache so profile changes are reflected
-        invalidateSuggestedUsersCache();
+        // Invalidate suggestions cache only for this user
+        invalidateSuggestedUsersCache(userId);
 
         // Queue user embedding vector update in background when profile changes
         queueEmbedding(userId);
@@ -411,10 +442,10 @@ export const getSuggestedUsers = async (req, res) => {
         const limitParam = Math.min(20, Math.max(1, parseInt(req.query.limit) || 10));
         const forceRefresh = req.query.refresh === "true";
 
-        // 1. Check in-memory 5-minute cache (unless forced refresh)
+        // 1. Check in-memory bounded TTL cache (unless forced refresh)
         if (!forceRefresh) {
             const cached = suggestionsCache.get(loggedInUserId);
-            if (cached && cached.expiresAt > Date.now()) {
+            if (cached) {
                 const durationMs = Date.now() - startTime;
                 console.log(`[SuggestedUsers] userId=${loggedInUserId} source=${cached.source} (cached) durationMs=${durationMs} resultCount=${cached.users.length}`);
                 return res.status(200).json({
@@ -459,15 +490,17 @@ export const getSuggestedUsers = async (req, res) => {
                             index: vectorIndexName,
                             path: "embedding",
                             queryVector: loggedInUser.embedding,
-                            numCandidates: 1000,
-                            limit: 150,
+                            numCandidates: 100,
+                            limit: 50,
+                            filter: {
+                                embeddingModel: { $eq: loggedInUser.embeddingModel },
+                                embeddingStatus: { $eq: "ready" }
+                            }
                         }
                     },
                     {
                         $match: {
-                            _id: { $nin: excludeObjectIds },
-                            embeddingModel: loggedInUser.embeddingModel,
-                            embeddingStatus: "ready",
+                            _id: { $nin: excludeObjectIds }
                         }
                     },
                     {
@@ -547,11 +580,10 @@ export const getSuggestedUsers = async (req, res) => {
             ...(u.mutualCount !== undefined ? { mutualCount: u.mutualCount } : {}),
         }));
 
-        // Cache result for 5 minutes
+        // Cache result in bounded TTL cache
         suggestionsCache.set(loggedInUserId, {
             users: sanitizedUsers,
             source,
-            expiresAt: Date.now() + 5 * 60 * 1000
         });
 
         const durationMs = Date.now() - startTime;
@@ -597,6 +629,7 @@ export const followOrUnfollow = async (req, res) => {
             await Promise.all([
                 User.updateOne({ _id: followKrneWala }, { $pull: { following: jiskoFollowKrunga } }),
                 User.updateOne({ _id: jiskoFollowKrunga }, { $pull: { followers: followKrneWala } }),
+                Notification.findOneAndDelete({ to: jiskoFollowKrunga, from: followKrneWala, type: "follow" }),
             ]);
             // Invalidate suggestions cache after DB update commits
             invalidateSuggestedUsersCache(followKrneWala);
@@ -612,12 +645,22 @@ export const followOrUnfollow = async (req, res) => {
             invalidateSuggestedUsersCache(followKrneWala);
             invalidateSuggestedUsersCache(jiskoFollowKrunga);
             try {
-                const notif = await Notification.create({
+                // Prevent duplicate follow notifications
+                const existingNotif = await Notification.findOne({
                     to: jiskoFollowKrunga,
                     from: followKrneWala,
-                    type: "follow",
-                    data: { followerId: followKrneWala, followerUsername: user?.username || "" }
+                    type: "follow"
                 });
+
+                let notif = existingNotif;
+                if (!existingNotif) {
+                    notif = await Notification.create({
+                        to: jiskoFollowKrunga,
+                        from: followKrneWala,
+                        type: "follow",
+                        data: { followerId: followKrneWala, followerUsername: user?.username || "" }
+                    });
+                }
 
                 try {
                     if (typeof io !== "undefined" && io) {

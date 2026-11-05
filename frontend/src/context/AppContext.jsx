@@ -30,46 +30,74 @@ export const AppProvider = ({ children }) => {
     }
   });
 
-  const setAuthUser = (u) => {
-    const normalized = normalizeUser(u);
-    setUserState(normalized);
-    if (normalized) {
-      localStorage.setItem("vybe_user", JSON.stringify(normalized));
-    } else {
-      localStorage.removeItem("vybe_user");
-    }
-  };
-
-  const mergeAuthUser = (data) => {
-    setUserState((prev) => {
-      const updated = normalizeUser({ ...(prev || {}), ...(data || {}) });
-      if (updated) {
-        localStorage.setItem("vybe_user", JSON.stringify(updated));
-      }
-      return updated;
-    });
-  };
-
-  // Validate & sync login session with backend /me endpoint on mount
+  const userRef = useRef(user);
   useEffect(() => {
-    let isCurrent = true;
-    const syncAuth = async () => {
+    userRef.current = user;
+  }, [user]);
+
+  // --- Connected Users State (single cache for ChatPage, Post share dialog, Message forward dialog) ---
+  const [connectedUsers, setConnectedUsers] = useState([]);
+  const [loadingConnectedUsers, setLoadingConnectedUsers] = useState(false);
+  const connectedUsersFetchedRef = useRef(false);
+  const pendingPromiseRef = useRef(null);
+
+  const setAuthUser = useCallback((u) => {
+    const normalized = normalizeUser(u);
+    if (normalized) {
       try {
-        const res = await api.get('/api/v1/user/me');
-        if (isCurrent && res.data?.success && res.data.user) {
-          setAuthUser(res.data.user);
-        }
-      } catch (err) {
-        if (isCurrent && err.response?.status === 401) {
-          setAuthUser(null);
-        }
+        localStorage.setItem("vybe_user", JSON.stringify(normalized));
+      } catch (e) {
+        console.error("Failed to save user to localStorage:", e);
       }
-    };
-    syncAuth();
-    return () => {
-      isCurrent = false;
-    };
+    } else {
+      try {
+        localStorage.removeItem("vybe_user");
+      } catch (e) {
+        console.error("Failed to remove user from localStorage:", e);
+      }
+    }
+    connectedUsersFetchedRef.current = false;
+    pendingPromiseRef.current = null;
+    setConnectedUsers([]);
+    userRef.current = normalized;
+    setUserState(normalized);
   }, []);
+
+  const mergeAuthUser = useCallback((data) => {
+    const prev = userRef.current;
+    const updated = normalizeUser({ ...(prev || {}), ...(data || {}) });
+    if (updated) {
+      try {
+        localStorage.setItem("vybe_user", JSON.stringify(updated));
+      } catch (e) {
+        console.error("Failed to save user to localStorage:", e);
+      }
+    }
+    if (data?.following || data?.followers) {
+      connectedUsersFetchedRef.current = false;
+      pendingPromiseRef.current = null;
+    }
+    userRef.current = updated;
+    setUserState(updated);
+  }, []);
+
+  // Validate & sync login session with backend /me endpoint
+  const syncAuth = useCallback(async () => {
+    try {
+      const res = await api.get('/api/v1/user/me');
+      if (res.data?.success && res.data.user) {
+        setAuthUser(res.data.user);
+      }
+    } catch (err) {
+      if (err.response?.status === 401) {
+        setAuthUser(null);
+      }
+    }
+  }, [setAuthUser]);
+
+  useEffect(() => {
+    syncAuth();
+  }, [syncAuth]);
 
   const [suggestedUsers, setSuggestedUsers] = useState([]);
   const [userProfile, setUserProfile] = useState(null);
@@ -140,8 +168,66 @@ export const AppProvider = ({ children }) => {
     selectedUserRef.current = selectedUser;
   }, [selectedUser]);
 
+  const fetchConnectedUsers = useCallback(async (force = false) => {
+    if (!user?._id) {
+      setConnectedUsers([]);
+      connectedUsersFetchedRef.current = false;
+      pendingPromiseRef.current = null;
+      return [];
+    }
+    // Return cached list if available and not forced
+    if (!force && connectedUsersFetchedRef.current) {
+      return connectedUsers;
+    }
+    // Reuse pending in-flight promise if multiple components trigger fetch simultaneously
+    if (!force && pendingPromiseRef.current) {
+      return pendingPromiseRef.current;
+    }
+
+    setLoadingConnectedUsers(true);
+
+    const promise = (async () => {
+      try {
+        const [fRes, gRes] = await Promise.all([
+          api.get(`/api/v1/user/${user._id}/followers`),
+          api.get(`/api/v1/user/${user._id}/following`),
+        ]);
+        const followers = Array.isArray(fRes.data?.users) ? fRes.data.users : [];
+        const following = Array.isArray(gRes.data?.users) ? gRes.data.users : [];
+
+        const map = new Map();
+        const myId = String(user._id);
+        [...followers, ...following].forEach((u) => {
+          if (u?._id && String(u._id) !== myId && !map.has(String(u._id))) {
+            map.set(String(u._id), u);
+          }
+        });
+
+        const list = Array.from(map.values()).sort((a, b) =>
+          (a.username || "").localeCompare(b.username || "")
+        );
+        setConnectedUsers(list);
+        connectedUsersFetchedRef.current = true;
+        return list;
+      } catch (err) {
+        console.error("fetchConnectedUsers error:", err);
+        return [];
+      } finally {
+        setLoadingConnectedUsers(false);
+        pendingPromiseRef.current = null;
+      }
+    })();
+
+    pendingPromiseRef.current = promise;
+    return promise;
+  }, [user?._id, connectedUsers]);
+
+  const invalidateConnectedUsers = useCallback(() => {
+    connectedUsersFetchedRef.current = false;
+    pendingPromiseRef.current = null;
+  }, []);
+
   // --- Real-time Notification State ---
-  const [likeNotification, setLikeNotificationState] = useState([]);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
 
   const fetchUnreadNotifCount = useCallback(async () => {
@@ -163,34 +249,6 @@ export const AppProvider = ({ children }) => {
       setUnreadNotifCount(0);
     }
   }, [user?._id, fetchUnreadNotifCount]);
-
-  const setLikeNotification = (notification) => {
-    if (!notification) return;
-    if (notification.type === "like") {
-      setLikeNotificationState((prev) => [notification, ...prev]);
-    } else if (notification.type === "dislike") {
-      setLikeNotificationState((prev) =>
-        prev.filter(
-          (n) => n.userId !== notification.userId || n.postId !== notification.postId
-        )
-      );
-    } else {
-      setLikeNotificationState((prev) => [notification, ...prev]);
-    }
-  };
-
-  const removeNotification = (id) => {
-    setLikeNotificationState((prev) =>
-      prev.filter((n) => {
-        const nid = n._id ?? `${n.type}:${n.postId}:${n.userId}`;
-        return nid !== id;
-      })
-    );
-  };
-
-  const clearAllNotifications = () => {
-    setLikeNotificationState([]);
-  };
 
   // --- Socket State & Centralized Lifecycle ---
   const [socket, setSocket] = useState(null);
@@ -266,7 +324,14 @@ export const AppProvider = ({ children }) => {
     };
 
     const onNewNotification = (notification) => {
-      setLikeNotification(notification);
+      fetchUnreadNotifCount();
+      if (notification?.type === "follow") {
+        syncAuth();
+        fetchConnectedUsers(true);
+      }
+    };
+
+    const onPostLikeRemoved = () => {
       fetchUnreadNotifCount();
     };
 
@@ -296,6 +361,7 @@ export const AppProvider = ({ children }) => {
     socketio.on("userOnline", onUserOnline);
     socketio.on("userOffline", onUserOffline);
     socketio.on("newNotification", onNewNotification);
+    socketio.on("postLikeRemoved", onPostLikeRemoved);
     socketio.on("newMessage", onNewMessage);
 
     return () => {
@@ -306,9 +372,10 @@ export const AppProvider = ({ children }) => {
       socketio.off("userOnline", onUserOnline);
       socketio.off("userOffline", onUserOffline);
       socketio.off("newNotification", onNewNotification);
+      socketio.off("postLikeRemoved", onPostLikeRemoved);
       socketio.off("newMessage", onNewMessage);
     };
-  }, [user?._id, fetchUnreadNotifCount]);
+  }, [user?._id, fetchUnreadNotifCount, syncAuth, fetchConnectedUsers]);
 
   const value = useMemo(() => ({
     // Auth
@@ -340,19 +407,23 @@ export const AppProvider = ({ children }) => {
     markChatAsRead,
 
     // Notification
-    likeNotification,
-    setLikeNotification,
-    removeNotification,
-    clearAllNotifications,
     unreadNotifCount,
     setUnreadNotifCount,
     fetchUnreadNotifCount,
+
+    // Connections
+    connectedUsers,
+    loadingConnectedUsers,
+    fetchConnectedUsers,
+    invalidateConnectedUsers,
 
     // Socket
     socket,
     setSocket,
   }), [
     user,
+    setAuthUser,
+    mergeAuthUser,
     suggestedUsers,
     userProfile,
     selectedUser,
@@ -360,13 +431,16 @@ export const AppProvider = ({ children }) => {
     selectedPost,
     onlineUsers,
     messages,
-    likeNotification,
     unreadNotifCount,
     unreadChatCount,
     fetchUnreadChatCount,
     fetchSuggestedUsers,
     markChatAsRead,
     fetchUnreadNotifCount,
+    connectedUsers,
+    loadingConnectedUsers,
+    fetchConnectedUsers,
+    invalidateConnectedUsers,
     socket,
   ]);
 

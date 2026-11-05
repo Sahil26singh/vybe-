@@ -3,21 +3,22 @@ import pLimit from "p-limit";
 import { User } from "../models/user.model.js";
 import { Post } from "../models/post.model.js";
 import { generateUserEmbedding } from "../utils/gemini.js";
+import { BoundedTTLCache, invalidateSuggestedUsersCache } from "../utils/cache.js";
 
 // Concurrency limiter: max 3 simultaneous Gemini embedding API calls
 const limit = pLimit(3);
 
-const COOLDOWN_MS = 5000; // 5 seconds debounce
-const lastProcessedAt = new Map(); // userId (string) -> timestamp (ms)
+const COOLDOWN_MS = 5 * 60 * 1000; // 5-minute cooldown
+const lastProcessedAt = new BoundedTTLCache(2000, 15 * 60 * 1000); // userId (string) -> timestamp (ms)
 const trailingTimers = new Map();   // userId (string) -> setTimeout handle
 const inFlight = new Set();        // userId (string)
 
 /**
  * Builds representative text for a user using their bio + up to 5 recent post captions.
  * Does NOT include the username.
- * If total text is shorter than 5 characters, returns null (not enough signal).
+ * If total text is shorter than 20 characters, returns null (not enough signal).
  */
-export const buildProfileText = async (user) => {
+const buildProfileText = async (user) => {
   if (!user) return null;
 
   const bio = (user.bio || "").trim();
@@ -36,7 +37,7 @@ export const buildProfileText = async (user) => {
   if (captions.length > 0) parts.push(captions.join(". "));
 
   const combined = parts.join(". ").trim();
-  if (combined.length < 5) {
+  if (combined.length < 20) {
     return null;
   }
   return combined;
@@ -45,7 +46,7 @@ export const buildProfileText = async (user) => {
 /**
  * Internal worker to process embedding with up to 3 attempts and exponential backoff
  */
-export const processUserEmbedding = async (userId) => {
+const processUserEmbedding = async (userId) => {
   const user = await User.findById(userId).select("+embedding");
   if (!user) return;
 
@@ -90,9 +91,8 @@ export const processUserEmbedding = async (userId) => {
     await user.save();
     console.log(`[Embedding Service] Ready: 768-dim vector for @${user.username} using [${result.model}]`);
     try {
-      const { invalidateSuggestedUsersCache } = await import("../controllers/user.controller.js");
-      invalidateSuggestedUsersCache();
-    } catch (e) {
+      invalidateSuggestedUsersCache(userId);
+    } catch {
       // ignore
     }
   } else {

@@ -67,7 +67,7 @@ export default function PostDetail() {
   useEffect(() => {
     if (!id) return;
     let isCurrent = true;
-    api.get(`/api/v1/post/${id}/comment/all`)
+    api.get(`/api/v1/post/${id}/comments`)
       .then((res) => {
         if (isCurrent && res.data?.success && Array.isArray(res.data.comments)) {
           setComments(res.data.comments);

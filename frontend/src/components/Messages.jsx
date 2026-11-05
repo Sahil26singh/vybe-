@@ -13,28 +13,19 @@ const MESSAGE_API = "/api/v1/message";
 const idStr = (v) => (v == null ? "" : (typeof v === "object" && v._id ? String(v._id) : String(v)));
 const safe = (v, fallback = "") => (v == null ? fallback : v);
 
-function tryParse(jsonLike) {
-  if (typeof jsonLike !== "string") return null;
-  try {
-    return JSON.parse(jsonLike);
-  } catch {
-    return null;
-  }
-}
-
-function SharedPostCard({ data }) {
+function SharedPostCard({ post }) {
   const navigate = useNavigate();
-  const post = data?.post || {};
-  const author = post?.author || data?.author || null;
+  if (!post) return null;
+  const author = post?.author || null;
 
   const img = post?.image;
   const caption = safe(post?.caption, "");
-  const username = safe(author?.username || data?.authorName || post?.authorName, "Unknown");
-  const authorId = author?._id || data?.authorId || null;
-  const pfp = author?.profilePicture || data?.profilePicture || null;
+  const username = safe(author?.username, "Unknown");
+  const authorId = author?._id || null;
+  const pfp = author?.profilePicture || null;
 
   return (
-    <div className="border rounded-lg overflow-hidden max-w-xs bg-white shadow-sm">
+    <div className="border rounded-lg overflow-hidden max-w-xs bg-white shadow-sm text-black">
       {img && <img src={img} alt="shared-post" className="w-full aspect-square object-cover" />}
       <div className="p-3 flex items-center gap-2 border-t">
         <Avatar className="w-8 h-8">
@@ -98,7 +89,7 @@ const Messages = () => {
   useGetRTM();
   useGetAllMessage();
 
-  const { messages, setMessages, user, selectedUser } = useApp();
+  const { messages, setMessages, user, selectedUser, connectedUsers, fetchConnectedUsers } = useApp();
   const containerRef = useRef(null);
   const bottomRef = useRef(null);
 
@@ -164,48 +155,17 @@ const Messages = () => {
 
   const isMine = (m) => idStr(m?.senderId) === idStr(user?._id);
 
-  const [connections, setConnections] = useState([]);
-
   useEffect(() => {
-    if (!showForward || !user?._id) return;
-    const fetchConnections = async () => {
-      try {
-        const [followersRes, followingRes] = await Promise.all([
-          api.get(`/api/v1/user/${user._id}/followers`),
-          api.get(`/api/v1/user/${user._id}/following`),
-        ]);
-
-        const followersList = followersRes.data?.success ? followersRes.data.users : [];
-        const followingList = followingRes.data?.success ? followingRes.data.users : [];
-
-        const pool = [];
-        const seen = new Set();
-        const me = idStr(user._id);
-
-        const add = (u) => {
-          if (!u || !u._id) return;
-          const uid = idStr(u._id);
-          if (uid === me || seen.has(uid)) return;
-          seen.add(uid);
-          pool.push(u);
-        };
-
-        followersList.forEach(add);
-        followingList.forEach(add);
-
-        setConnections(pool.sort((a, b) => (safe(a.username).toLowerCase()).localeCompare(safe(b.username).toLowerCase())));
-      } catch (err) {
-        console.error(err);
-      }
-    };
-    fetchConnections();
-  }, [showForward, user?._id]);
+    if (showForward) {
+      fetchConnectedUsers();
+    }
+  }, [showForward, fetchConnectedUsers]);
 
   const filteredCandidates = useMemo(() => {
     const q = forwardFilter.trim().toLowerCase();
-    if (!q) return connections;
-    return connections.filter((u) => safe(u.username).toLowerCase().includes(q));
-  }, [connections, forwardFilter]);
+    if (!q) return connectedUsers;
+    return connectedUsers.filter((u) => safe(u.username).toLowerCase().includes(q));
+  }, [connectedUsers, forwardFilter]);
 
   useEffect(() => {
     const onDocClick = (e) => {
@@ -215,24 +175,14 @@ const Messages = () => {
     return () => document.removeEventListener("click", onDocClick);
   }, []);
 
-  const parseActivePayload = () => tryParse(activeMsg?.message);
-  const activeIsShared = () => parseActivePayload()?.type === "post-share";
+  const isPostShare = (msg) => msg?.messageType === "post-share" || Boolean(msg?.postAttachment);
 
   const doEdit = async () => {
     const m = activeMsg;
-    if (!m) return;
+    if (!m || isPostShare(m)) return;
 
-    let nextTextRaw = editText.trim();
-    if (activeIsShared()) {
-      const payload = parseActivePayload() || {};
-      const nextPayload = {
-        ...payload,
-        post: { ...(payload.post || {}), caption: nextTextRaw },
-      };
-      nextTextRaw = JSON.stringify(nextPayload);
-    } else {
-      if (!nextTextRaw || nextTextRaw === m.message) return;
-    }
+    const nextTextRaw = editText.trim();
+    if (!nextTextRaw || nextTextRaw === m.message) return;
 
     try {
       setMessages((prev) =>
@@ -303,11 +253,10 @@ const Messages = () => {
 
   const renderBubble = (msg) => {
     const mine = isMine(msg);
-    const payload = tryParse(msg?.message);
-    const isShare = payload?.type === "post-share";
+    const isShare = isPostShare(msg);
 
     const bubble = isShare ? (
-      <SharedPostCard data={payload} />
+      <SharedPostCard post={msg?.postAttachment} />
     ) : (
       <div
         className={`p-2 rounded-lg max-w-[80%] break-words ${
@@ -330,18 +279,14 @@ const Messages = () => {
         onClick={(e) => {
           e.stopPropagation();
           setActiveMsg(msg);
-          const p = tryParse(msg?.message);
-          if (p?.type === "post-share") setEditText(safe(p?.post?.caption, ""));
-          else setEditText(safe(msg?.message, ""));
+          setEditText(safe(msg?.message, ""));
           setShowAction(true);
         }}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
           setActiveMsg(msg);
-          const p = tryParse(msg?.message);
-          if (p?.type === "post-share") setEditText(safe(p?.post?.caption, ""));
-          else setEditText(safe(msg?.message, ""));
+          setEditText(safe(msg?.message, ""));
           setShowAction(true);
         }}
       >
@@ -378,7 +323,7 @@ const Messages = () => {
         <ModalHeader title="Message actions" onClose={() => setShowAction(false)} />
         <div className="px-4 py-2">
           <div className="flex flex-col divide-y">
-            {isMine(activeMsg) && (
+            {isMine(activeMsg) && !isPostShare(activeMsg) && (
               <button
                 className="py-3 text-left hover:bg-gray-50"
                 onClick={() => {
@@ -386,7 +331,7 @@ const Messages = () => {
                   setShowEdit(true);
                 }}
               >
-                 Edit{activeIsShared() ? " caption" : ""}
+                 Edit
               </button>
             )}
             <button
@@ -419,7 +364,7 @@ const Messages = () => {
       </Modal>
 
       <Modal open={showEdit} onClose={() => setShowEdit(false)}>
-        <ModalHeader title={activeIsShared() ? "Edit shared post caption" : "Edit message"} onClose={() => setShowEdit(false)} />
+        <ModalHeader title="Edit message" onClose={() => setShowEdit(false)} />
         <div className="p-4">
           <textarea
             value={editText}

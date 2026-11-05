@@ -3,7 +3,9 @@ import { Conversation } from "../models/conversation.model.js";
 import { io } from "../socket/socket.js";
 import { Message } from "../models/message.model.js";
 import { User } from "../models/user.model.js";
+import { Post } from "../models/post.model.js";
 import { usernameCache } from "../utils/cache.js";
+import { moderateText } from "../utils/gemini.js";
 
 // In-memory bounded TTL cache for usernames to eliminate redundant User.findById queries on every message
 const getCachedUsername = async (userId) => {
@@ -31,8 +33,7 @@ const getOrCreateMergedConversation = async (id1, id2) => {
         {
           $setOnInsert: {
             participants: sortedParticipants,
-            participantsKey,
-            messages: []
+            participantsKey
           }
         },
         { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -51,14 +52,28 @@ export const sendMessage = async (req, res) => {
   try {
     const senderId = req.id;
     const receiverId = req.params.id;
-    const { textMessage: message } = req.body;
+    const rawMessage = req.body.textMessage !== undefined ? req.body.textMessage : req.body.message;
+    const postId = req.body.postId;
 
-    if (!message || !message.trim()) {
-      return res.status(400).json({ success: false, message: "Message text cannot be empty" });
+    const trimmedMessage = typeof rawMessage === "string" ? rawMessage.trim().slice(0, 2000) : "";
+
+    if (!trimmedMessage && !postId) {
+      return res.status(400).json({ success: false, message: "Message text or post attachment is required" });
     }
 
     if (String(senderId) === String(receiverId)) {
       return res.status(400).json({ success: false, message: "Cannot send message to yourself" });
+    }
+
+    // Moderate message text for policy violations
+    if (trimmedMessage) {
+      const textModeration = await moderateText(trimmedMessage);
+      if (!textModeration.safe) {
+        return res.status(400).json({
+          success: false,
+          message: textModeration.reason || "Message violates community policy."
+        });
+      }
     }
 
     const receiver = await User.findById(receiverId);
@@ -66,18 +81,39 @@ export const sendMessage = async (req, res) => {
       return res.status(404).json({ success: false, message: "Receiver not found" });
     }
 
-    const trimmedMessage = message.trim();
-    const conversation = await getOrCreateMergedConversation(senderId, receiverId);
+    let messageType = "text";
+    let postAttachment = null;
 
-    // create message
-    const newMessage = await Message.create({
+    if (postId) {
+      if (!mongoose.isValidObjectId(postId)) {
+        return res.status(400).json({ success: false, message: "Invalid postId" });
+      }
+      const postDoc = await Post.findById(postId);
+      if (!postDoc) {
+        return res.status(404).json({ success: false, message: "Attached post not found" });
+      }
+      messageType = "post-share";
+      postAttachment = postDoc._id;
+    }
+
+    await getOrCreateMergedConversation(senderId, receiverId);
+
+    // create message in dedicated messages collection
+    let newMessage = await Message.create({
       senderId,
       receiverId,
-      message: trimmedMessage
+      messageType,
+      message: trimmedMessage,
+      postAttachment,
     });
 
-    // push message id into conversation atomically
-    await Conversation.findByIdAndUpdate(conversation._id, { $push: { messages: newMessage._id } });
+    if (postAttachment) {
+      newMessage = await newMessage.populate({
+        path: "postAttachment",
+        select: "image caption author createdAt",
+        populate: { path: "author", select: "username profilePicture" },
+      });
+    }
 
     // emit realtime newMessage to both sender (other tabs) and receiver
     try {
@@ -109,33 +145,33 @@ export const getMessage = async (req, res) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
     const before = req.query.before;
 
-    const sortedParticipants = [String(senderId), String(receiverId)].sort();
-    const participantsKey = sortedParticipants.join(":");
+    const participantFilter = {
+      $or: [
+        { senderId, receiverId },
+        { senderId: receiverId, receiverId: senderId }
+      ]
+    };
 
-    // Read-only: find existing conversation by participantsKey without creating, merging or deleting
-    const conversation = await Conversation.findOne({ participantsKey });
-
-    if (!conversation) {
-      return res.status(200).json({ success: true, messages: [], totalMessages: 0, hasMore: false });
-    }
-
-    const totalMessages = (conversation.messages || []).length;
-
-    let messageFilter = { _id: { $in: conversation.messages || [] } };
+    let messageFilter = { ...participantFilter };
 
     // Cursor-based pagination support (?before=<lastMessageId>)
     if (before && mongoose.isValidObjectId(before)) {
-      const cursorMsg = await Message.findById(before).select("createdAt");
+      const cursorMsg = await Message.findOne({ _id: before, ...participantFilter }).select("createdAt");
       if (cursorMsg) {
         messageFilter.createdAt = { $lt: cursorMsg.createdAt };
-      } else {
-        messageFilter._id = { $lt: before };
       }
     }
 
+    const totalMessages = await Message.countDocuments(participantFilter);
+
     const query = Message.find(messageFilter)
       .sort({ createdAt: -1 })
-      .limit(limit);
+      .limit(limit)
+      .populate({
+        path: "postAttachment",
+        select: "image caption author createdAt",
+        populate: { path: "author", select: "username profilePicture" },
+      });
 
     // If cursor was not passed, use skip-based offset if page > 1
     if (!before && page > 1) {
@@ -159,7 +195,7 @@ export const getMessage = async (req, res) => {
       hasMore
     });
   } catch (error) {
-    console.log(error);
+    console.error("getMessage error:", error);
     return res.status(500).json({ success: false, message: "Failed to load messages" });
   }
 };
@@ -212,10 +248,16 @@ export const editMessage = async (req, res) => {
     if (!text || !text.trim()) {
       return res.status(400).json({ success: false, message: "Text is required" });
     }
+    if (text.trim().length > 2000) {
+      return res.status(400).json({ success: false, message: "Message cannot exceed 2000 characters" });
+    }
     const msg = await Message.findById(messageId);
     if (!msg) return res.status(404).json({ success: false, message: "Message not found" });
     if (String(msg.senderId) !== String(userId)) {
       return res.status(403).json({ success: false, message: "Not allowed to edit this message" });
+    }
+    if (msg.messageType === "post-share") {
+      return res.status(400).json({ success: false, message: "Shared posts cannot be edited" });
     }
     msg.message = text.trim();
     await msg.save();
@@ -249,8 +291,7 @@ export const deleteMessage = async (req, res) => {
 
     const receiverId = String(msg.receiverId);
 
-    // Pull the message from any conversation that contains it
-    await Conversation.updateMany({ messages: messageId }, { $pull: { messages: messageId } });
+    // Delete message from messages collection
     await Message.deleteOne({ _id: messageId });
 
     // Emit realtime deletion to both sender (other tabs) and receiver
@@ -275,24 +316,44 @@ export const forwardMessage = async (req, res) => {
     const senderId = req.id;
     const { id: messageId } = req.params; // original message id
     const { toUserId } = req.body;
-    if (!toUserId) {
-      return res.status(400).json({ success: false, message: "toUserId is required" });
+
+    if (!toUserId || !mongoose.isValidObjectId(toUserId)) {
+      return res.status(400).json({ success: false, message: "Valid toUserId is required" });
     }
+
+    if (String(senderId) === String(toUserId)) {
+      return res.status(400).json({ success: false, message: "Cannot forward message to yourself" });
+    }
+
+    const recipient = await User.findById(toUserId).select("_id");
+    if (!recipient) {
+      return res.status(404).json({ success: false, message: "Recipient user not found" });
+    }
+
     const original = await Message.findOne({
       _id: messageId,
       $or: [{ senderId }, { receiverId: senderId }],
     });
     if (!original) return res.status(404).json({ success: false, message: "Original message not found" });
 
-    const conversation = await getOrCreateMergedConversation(senderId, toUserId);
+    await getOrCreateMergedConversation(senderId, toUserId);
 
-    // Create a new message with same text
-    const newMsg = await Message.create({
+    // Create a new message preserving text, type, and post attachment
+    let newMsg = await Message.create({
       senderId,
       receiverId: toUserId,
-      message: original.message
+      messageType: original.messageType || "text",
+      message: (original.message || "").slice(0, 2000),
+      postAttachment: original.postAttachment || null,
     });
-    await Conversation.findByIdAndUpdate(conversation._id, { $push: { messages: newMsg._id } });
+
+    if (newMsg.postAttachment) {
+      newMsg = await newMsg.populate({
+        path: "postAttachment",
+        select: "image caption author createdAt",
+        populate: { path: "author", select: "username profilePicture" },
+      });
+    }
 
     // Realtime emit to both sender (other tabs) and receiver if online
     try {

@@ -28,10 +28,8 @@ const LeftSidebar = () => {
   const [open, setOpen] = useState(false);
   // CONNECTIONS (handshake) state
   const [connectionsOpen, setConnectionsOpen] = useState(false);
-  const [followersCount, setFollowersCount] = useState(null);
-  const [followingCount, setFollowingCount] = useState(null);
-  const [connectionsLoading, setConnectionsLoading] = useState(false);
-  const [connectionsError, setConnectionsError] = useState(null);
+  const followersCount = user?.followers?.length ?? 0;
+  const followingCount = user?.following?.length ?? 0;
 
   useEffect(() => {
     if (open) {
@@ -142,33 +140,9 @@ const LeftSidebar = () => {
   const isActive = (text) => isRouteActive(text);
 
   // --- Connections (Followers / Following) ---
-  const fetchConnectionsCounts = async (userId = user?._id) => {
-    if (!userId) return;
-    setConnectionsLoading(true);
-    setConnectionsError(null);
-    try {
-      const [fRes, gRes] = await Promise.all([
-        api.get(`/api/v1/user/${userId}/followers`),
-        api.get(`/api/v1/user/${userId}/following`),
-      ]);
-      const fList = Array.isArray(fRes.data?.users) ? fRes.data.users : Array.isArray(fRes.data?.data) ? fRes.data.data : [];
-      const gList = Array.isArray(gRes.data?.users) ? gRes.data.users : Array.isArray(gRes.data?.data) ? gRes.data.data : [];
-      setFollowersCount(fList.length);
-      setFollowingCount(gList.length);
-    } catch (err) {
-      console.error("fetchConnectionsCounts error:", err);
-      setConnectionsError("Failed to load");
-      setFollowersCount(null);
-      setFollowingCount(null);
-    } finally {
-      setConnectionsLoading(false);
-    }
-  };
-
   const onConnectionsOpenChange = (open) => {
     setConnectionsOpen(open);
     setManualActive(open ? "Connections" : null);
-    if (open) fetchConnectionsCounts();
   };
 
   return (
@@ -211,35 +185,27 @@ const LeftSidebar = () => {
 
                   <PopoverContent side="right" align="start" className="w-48 p-2" onClick={(e) => e.stopPropagation()}>
                     <div className="flex flex-col">
-                      {connectionsLoading ? (
-                        <div className="px-3 py-2 text-sm text-gray-600">Loading…</div>
-                      ) : connectionsError ? (
-                        <div className="px-3 py-2 text-sm text-red-600">{connectionsError}</div>
-                      ) : (
-                        <>
-                          <button
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-blue-300 rounded"
-                            onClick={() => {
-                              setConnectionsOpen(false);
-                              setManualActive(null);
-                              navigate(`/profile/${user?._id}/followers`);
-                            }}
-                          >
-                            Followers {typeof followersCount === "number" ? `(${followersCount})` : ""}
-                          </button>
+                      <button
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-blue-300 rounded"
+                        onClick={() => {
+                          setConnectionsOpen(false);
+                          setManualActive(null);
+                          navigate(`/profile/${user?._id}/followers`);
+                        }}
+                      >
+                        Followers ({followersCount})
+                      </button>
 
-                          <button
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-blue-300 rounded"
-                            onClick={() => {
-                              setConnectionsOpen(false);
-                              setManualActive(null);
-                              navigate(`/profile/${user?._id}/following`);
-                            }}
-                          >
-                            Following {typeof followingCount === "number" ? `(${followingCount})` : ""}
-                          </button>
-                        </>
-                      )}
+                      <button
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-blue-300 rounded"
+                        onClick={() => {
+                          setConnectionsOpen(false);
+                          setManualActive(null);
+                          navigate(`/profile/${user?._id}/following`);
+                        }}
+                      >
+                        Following ({followingCount})
+                      </button>
                     </div>
                   </PopoverContent>
                 </Popover>

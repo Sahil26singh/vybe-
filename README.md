@@ -191,9 +191,9 @@ This application was architected with clear boundaries to demonstrate modern ful
    - *Current*: Profile text embeddings are generated asynchronously in-process with a `p-limit(3)` queue and debouncing timers.
    - *Scaling Plan*: Offload vector generation to a distributed task queue (e.g., **BullMQ + Redis** or AWS SQS). This isolates heavy external AI API latency and rate-limiting from the web server, enabling independent worker autoscaling and automatic retry policies with dead-letter queues.
 
-3. **Schema Normalization (Likes & Messages as Arrays)**:
-   - *Current*: Post likes (`[ObjectId]`) and conversation message IDs (`[ObjectId]`) are stored as embedded arrays within their parent documents for fast, single-document retrieval.
-   - *Scaling Plan*: While optimal for small to medium scale, documents with viral interaction could approach MongoDB's 16MB document limit. Transition likes to an indexed `likes` collection with compound indexing `{ targetId: 1, userId: 1 }` and partition conversation messages into a dedicated `messages` collection with cursor-based windowing.
+3. **Schema Normalization & Social Interactions**:
+   - *Current*: Messages are completely normalized into a dedicated `messages` collection with compound indexing `{ senderId: 1, receiverId: 1, createdAt: -1 }` and cursor-based windowing (not embedded in conversations). Post likes (`[ObjectId]`) are stored on posts for fast single-document retrieval.
+   - *Scaling Plan*: For posts with viral interaction approaching MongoDB's 16MB document limit, transition likes to a dedicated indexed `likes` collection with compound indexing `{ postId: 1, userId: 1 }`.
 
 4. **Distributed Rate Limiting**:
    - *Current*: Route rate limiting uses in-memory sliding window counters (`express-rate-limit`).

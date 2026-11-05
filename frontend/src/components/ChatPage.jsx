@@ -11,12 +11,20 @@ import { toast } from "sonner";
 
 const ChatPage = () => {
   const [textMessage, setTextMessage] = useState("");
-  const { user, selectedUser, setSelectedUser, onlineUsers, setMessages, markChatAsRead } = useApp();
+  const {
+    user,
+    selectedUser,
+    setSelectedUser,
+    onlineUsers,
+    setMessages,
+    markChatAsRead,
+    connectedUsers,
+    loadingConnectedUsers: loadingConnections,
+    fetchConnectedUsers,
+  } = useApp();
   const navigate = useNavigate();
   const { id: routeUserId } = useParams() || {};
 
-  const [connectedUsers, setConnectedUsers] = useState([]);
-  const [loadingConnections, setLoadingConnections] = useState(false);
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
@@ -25,37 +33,10 @@ const ChatPage = () => {
     }
   }, [selectedUser?._id, markChatAsRead]);
 
-  // Fetch all connected users (followers + following)
+  // Use shared connections from AppContext
   useEffect(() => {
-    const fetchConnections = async () => {
-      if (!user?._id) return;
-      setLoadingConnections(true);
-      try {
-        const [fRes, gRes] = await Promise.all([
-          api.get(`/api/v1/user/${user._id}/followers`),
-          api.get(`/api/v1/user/${user._id}/following`),
-        ]);
-
-        const followers = Array.isArray(fRes.data?.users) ? fRes.data.users : [];
-        const following = Array.isArray(gRes.data?.users) ? gRes.data.users : [];
-
-        const map = new Map();
-        [...followers, ...following].forEach((u) => {
-          if (u?._id && String(u._id) !== String(user._id)) {
-            map.set(String(u._id), u);
-          }
-        });
-
-        setConnectedUsers(Array.from(map.values()));
-      } catch (err) {
-        console.error("Failed to fetch connections for chat:", err);
-      } finally {
-        setLoadingConnections(false);
-      }
-    };
-
-    fetchConnections();
-  }, [user?._id]);
+    fetchConnectedUsers();
+  }, [fetchConnectedUsers]);
 
   // Send message
   const sendMessageHandler = async (receiverId) => {

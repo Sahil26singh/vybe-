@@ -6,7 +6,6 @@ const NotificationSchema = new mongoose.Schema({
   from: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: false },// sender
   type: { type: String, enum: ["like","follow","message","comment","other"], required: true },
   read: { type: Boolean, default: false },
-  opened: { type: Boolean, default: false }, 
   data: { type: mongoose.Schema.Types.Mixed },
   createdAt: { type: Date, default: Date.now }
 });

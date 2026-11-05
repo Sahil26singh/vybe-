@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
-import rateLimit from "express-rate-limit";
+import { globalLimiter, authLimiter } from "./middlewares/rateLimiter.js";
 import userRoute from "./routes/user.route.js";
 import postRoute from "./routes/post.route.js";
 import messageRoute from "./routes/message.route.js";
@@ -22,18 +22,17 @@ app.use(
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        imgSrc: ["'self'", "data:", "blob:", "https://res.cloudinary.com", "https:"],
+        imgSrc: ["'self'", "data:", "blob:", "https://res.cloudinary.com"],
         connectSrc: [
           "'self'",
           "ws:",
           "wss:",
           "https://res.cloudinary.com",
-          "https://vybe-ymdg.onrender.com",
-          "wss://vybe-ymdg.onrender.com",
-          "ws://localhost:*",
-          "http://localhost:*",
+          ...(process.env.NODE_ENV !== "production"
+            ? ["ws://localhost:*", "http://localhost:*"]
+            : []),
         ],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https:"],
         fontSrc: ["'self'", "https:", "data:"],
         objectSrc: ["'none'"],
@@ -47,20 +46,24 @@ app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
 
 const corsOptions = {
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.length > 0 && allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    if (process.env.NODE_ENV !== "production") {
+      return callback(null, true);
+    }
+    return callback(new Error("Not allowed by CORS"));
+  },
   credentials: true
 };
 app.use(cors(corsOptions));
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  skipSuccessfulRequests: true,
-  skip: () => process.env.DISABLE_RATE_LIMIT === "true",
-  message: { success: false, message: "Too many attempts, please try again later." },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// Apply global rate limiter to all API endpoints
+app.use("/api", globalLimiter);
+
+// Auth rate limiter on sensitive endpoints
 app.use("/api/v1/user/login", authLimiter);
 app.use("/api/v1/user/register", authLimiter);
 

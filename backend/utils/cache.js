@@ -49,4 +49,16 @@ export class BoundedTTLCache {
 }
 
 export const usernameCache = new BoundedTTLCache(1000, 10 * 60 * 1000);
+export const suggestionsCache = new BoundedTTLCache(1000, 15 * 60 * 1000);
+
+/**
+ * Invalidates the suggested users cache.
+ * If userId is provided, invalidates only that user's cached suggestions.
+ * If called with no arguments, does nothing (avoids flushing the entire cache on single-user actions).
+ */
+export function invalidateSuggestedUsersCache(userId) {
+  if (userId) {
+    suggestionsCache.delete(String(userId));
+  }
+}
 

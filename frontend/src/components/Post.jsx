@@ -34,7 +34,7 @@ const Post = ({ post, onUnlike, onUnbookmark }) => {
   const favKey = `fav:${idStr(post._id)}`;
   const [favorite, setFavorite] = useState(() => localStorage.getItem(favKey) === "1");
 
-  const { user, posts, setPosts, setSelectedPost, setAuthUser } = useApp();
+  const { user, posts, setPosts, setSelectedPost, setAuthUser, connectedUsers, fetchConnectedUsers } = useApp();
 
   const [liked, setLiked] = useState(() => hasId(post.likes, user?._id));
   const [postLike, setPostLike] = useState(() => (Array.isArray(post.likes) ? post.likes.length : 0));
@@ -187,69 +187,24 @@ const Post = ({ post, onUnlike, onUnbookmark }) => {
     }
   }, [posts, user?._id, post._id]);
 
-  const [connections, setConnections] = useState([]);
-
   useEffect(() => {
-    if (!shareOpen || !user?._id) return;
-    const fetchConnections = async () => {
-      try {
-        const [followersRes, followingRes] = await Promise.all([
-          api.get(`/api/v1/user/${user._id}/followers`),
-          api.get(`/api/v1/user/${user._id}/following`),
-        ]);
-
-        const followersList = followersRes.data?.success ? followersRes.data.users : [];
-        const followingList = followingRes.data?.success ? followingRes.data.users : [];
-
-        const pool = [];
-        const seen = new Set();
-        const me = idStr(user._id);
-
-        const add = (u) => {
-          if (!u || !u._id) return;
-          const uid = idStr(u._id);
-          if (uid === me || seen.has(uid)) return;
-          seen.add(uid);
-          pool.push(u);
-        };
-
-        followersList.forEach(add);
-        followingList.forEach(add);
-
-        setConnections(pool.sort((a, b) => (a.username || "").localeCompare(b.username || "")));
-      } catch (err) {
-        console.error(err);
-      }
-    };
-    fetchConnections();
-  }, [shareOpen, user?._id]);
+    if (shareOpen) {
+      fetchConnectedUsers();
+    }
+  }, [shareOpen, fetchConnectedUsers]);
 
   const filteredCandidates = useMemo(() => {
     const q = shareFilter.trim().toLowerCase();
-    if (!q) return connections;
-    return connections.filter((u) => (u.username || "").toLowerCase().includes(q));
-  }, [connections, shareFilter]);
+    if (!q) return connectedUsers;
+    return connectedUsers.filter((u) => (u.username || "").toLowerCase().includes(q));
+  }, [connectedUsers, shareFilter]);
 
   const shareToUser = async (receiver) => {
-    if (!receiver?._id) return;
+    if (!receiver?._id || !post?._id) return;
     try {
-      const payload = {
-        type: "post-share",
-        post: {
-          _id: post._id,
-          image: post.image,
-          caption: post.caption || "",
-        },
-        author: {
-          _id: post?.author?._id,
-          username: post?.author?.username,
-          profilePicture: post?.author?.profilePicture,
-        },
-      };
-
       const res = await api.post(
         `/api/v1/message/send/${receiver._id}`,
-        { textMessage: JSON.stringify(payload) }
+        { postId: post._id }
       );
 
       if (res.data?.success) {
@@ -261,7 +216,7 @@ const Post = ({ post, onUnlike, onUnbookmark }) => {
       }
     } catch (err) {
       console.error(err);
-      toast.error("Could not share the post");
+      toast.error(err?.response?.data?.message || "Could not share the post");
     }
   };
 

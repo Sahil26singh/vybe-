@@ -1,4 +1,5 @@
 import { z } from "zod";
+import mongoose from "mongoose";
 
 /**
  * Express middleware generator that validates request body against a Zod schema
@@ -37,6 +38,37 @@ export const editProfileSchema = z.object({
   gender: z
     .string()
     .max(50, "Gender cannot exceed 50 characters")
+    .optional()
+    .nullable(),
+});
+
+export const forwardMessageSchema = z.object({
+  toUserId: z
+    .string({ error: "toUserId is required" })
+    .trim()
+    .min(1, "toUserId is required")
+    .refine((val) => mongoose.isValidObjectId(val), {
+      message: "toUserId must be a valid ObjectId",
+    }),
+});
+
+export const sendMessageSchema = z.object({
+  textMessage: z
+    .string()
+    .max(2000, "Message cannot exceed 2000 characters")
+    .optional()
+    .nullable(),
+  message: z
+    .string()
+    .max(2000, "Message cannot exceed 2000 characters")
+    .optional()
+    .nullable(),
+  postId: z
+    .string()
+    .trim()
+    .refine((val) => !val || mongoose.isValidObjectId(val), {
+      message: "postId must be a valid ObjectId",
+    })
     .optional()
     .nullable(),
 });
