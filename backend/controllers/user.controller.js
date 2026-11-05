@@ -11,6 +11,9 @@ import { queueEmbedding } from "../services/embedding.service.js";
 import { usernameCache, suggestionsCache, invalidateSuggestedUsersCache } from "../utils/cache.js";
 import { moderateText, moderateImage } from "../utils/gemini.js";
 
+// Tracks whether the Atlas Vector Search index supports the native 'filter' parameter
+let atlasSupportsVectorFilter = true;
+
 // Return followers list populated with minimal fields
 export const getFollowers = async (req, res) => {
   try {
@@ -482,46 +485,91 @@ export const getSuggestedUsers = async (req, res) => {
             loggedInUser.embeddingModel;
 
         if (hasReadyVector) {
-            try {
-                const vectorIndexName = process.env.VECTOR_INDEX_NAME || "user_embedding_index";
-                const vectorMatches = await User.aggregate([
-                    {
-                        $vectorSearch: {
-                            index: vectorIndexName,
-                            path: "embedding",
-                            queryVector: loggedInUser.embedding,
-                            numCandidates: 100,
-                            limit: 50,
-                            filter: {
-                                embeddingModel: { $eq: loggedInUser.embeddingModel },
-                                embeddingStatus: { $eq: "ready" }
-                            }
-                        }
-                    },
-                    {
-                        $match: {
-                            _id: { $nin: excludeObjectIds }
-                        }
-                    },
-                    {
-                        $project: {
-                            _id: 1,
-                            username: 1,
-                            profilePicture: 1,
-                            bio: 1,
-                            score: { $meta: "vectorSearchScore" }
-                        }
-                    },
-                    { $limit: limitParam }
-                ]);
+            const vectorIndexName = process.env.VECTOR_INDEX_NAME || "user_embedding_index";
+            let vectorMatches = null;
 
-                if (vectorMatches && vectorMatches.length > 0) {
-                    results = vectorMatches;
-                    source = "vector";
+            // Attempt native Atlas Vector Search pre-filtering if supported
+            if (atlasSupportsVectorFilter) {
+                try {
+                    vectorMatches = await User.aggregate([
+                        {
+                            $vectorSearch: {
+                                index: vectorIndexName,
+                                path: "embedding",
+                                queryVector: loggedInUser.embedding,
+                                numCandidates: 100,
+                                limit: 50,
+                                filter: {
+                                    embeddingModel: { $eq: loggedInUser.embeddingModel },
+                                    embeddingStatus: { $eq: "ready" }
+                                }
+                            }
+                        },
+                        {
+                            $match: {
+                                _id: { $nin: excludeObjectIds }
+                            }
+                        },
+                        {
+                            $project: {
+                                _id: 1,
+                                username: 1,
+                                profilePicture: 1,
+                                bio: 1,
+                                score: { $meta: "vectorSearchScore" }
+                            }
+                        },
+                        { $limit: limitParam }
+                    ]);
+                } catch (filterErr) {
+                    if (filterErr.message && filterErr.message.includes("needs to be indexed as filter")) {
+                        console.warn("[SuggestedUsers] Atlas index lacks filter definition for embeddingModel/embeddingStatus. Falling back to pipeline $match filtering.");
+                        atlasSupportsVectorFilter = false;
+                    } else {
+                        console.error("[SuggestedUsers] Vector search error:", filterErr.message);
+                    }
                 }
-            } catch (vectorErr) {
-                console.error("[SuggestedUsers] Vector search error:", vectorErr.message);
-                // Gracefully continue to Tier B
+            }
+
+            // Fallback pipeline if Atlas index does not index filter fields
+            if (!vectorMatches && !atlasSupportsVectorFilter) {
+                try {
+                    vectorMatches = await User.aggregate([
+                        {
+                            $vectorSearch: {
+                                index: vectorIndexName,
+                                path: "embedding",
+                                queryVector: loggedInUser.embedding,
+                                numCandidates: 150,
+                                limit: 50,
+                            }
+                        },
+                        {
+                            $match: {
+                                _id: { $nin: excludeObjectIds },
+                                embeddingModel: loggedInUser.embeddingModel,
+                                embeddingStatus: "ready"
+                            }
+                        },
+                        {
+                            $project: {
+                                _id: 1,
+                                username: 1,
+                                profilePicture: 1,
+                                bio: 1,
+                                score: { $meta: "vectorSearchScore" }
+                            }
+                        },
+                        { $limit: limitParam }
+                    ]);
+                } catch (fallbackErr) {
+                    console.error("[SuggestedUsers] Fallback vector search error:", fallbackErr.message);
+                }
+            }
+
+            if (vectorMatches && vectorMatches.length > 0) {
+                results = vectorMatches;
+                source = "vector";
             }
         }
 
@@ -570,6 +618,45 @@ export const getSuggestedUsers = async (req, res) => {
             }
         }
 
+        // TIER C: Popular & active users (highest follower count & most recent users)
+        if (results.length < limitParam) {
+            try {
+                const alreadyFoundIds = results
+                    .map(u => (u._id instanceof mongoose.Types.ObjectId ? u._id : new mongoose.Types.ObjectId(String(u._id))));
+                const currentExclude = [...excludeObjectIds, ...alreadyFoundIds];
+                const needed = limitParam - results.length;
+
+                const popularMatches = await User.aggregate([
+                    { $match: { _id: { $nin: currentExclude } } },
+                    {
+                        $addFields: {
+                            followerCount: { $size: { $ifNull: ["$followers", []] } }
+                        }
+                    },
+                    { $sort: { followerCount: -1, createdAt: -1 } },
+                    { $limit: needed },
+                    {
+                        $project: {
+                            _id: 1,
+                            username: 1,
+                            profilePicture: 1,
+                            bio: 1,
+                            followerCount: 1
+                        }
+                    }
+                ]);
+
+                if (popularMatches && popularMatches.length > 0) {
+                    if (results.length === 0) {
+                        source = "popular";
+                    }
+                    results = results.concat(popularMatches);
+                }
+            } catch (popErr) {
+                console.error("[SuggestedUsers] Tier C popular users error:", popErr.message);
+            }
+        }
+
         // Clean output: NEVER return password, email, bookmarks, embedding, or embedding internal fields
         const sanitizedUsers = results.slice(0, limitParam).map(u => ({
             _id: u._id,
@@ -578,6 +665,7 @@ export const getSuggestedUsers = async (req, res) => {
             bio: u.bio || "",
             ...(u.score !== undefined ? { score: u.score } : {}),
             ...(u.mutualCount !== undefined ? { mutualCount: u.mutualCount } : {}),
+            ...(u.followerCount !== undefined ? { followerCount: u.followerCount } : {}),
         }));
 
         // Cache result in bounded TTL cache
